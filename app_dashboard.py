@@ -1,5 +1,6 @@
 # app_dashboard.py - 改修版ダッシュボード形式手術分析アプリ
 import streamlit as st
+import traceback
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -139,8 +140,11 @@ try:
     from prediction_tab_enhanced import create_prediction_tab
     
     MODULES_LOADED = True
-except ImportError as e:
-    st.error(f"必要なモジュールの読み込みに失敗しました: {e}")
+except Exception as e:
+    st.error(f"モジュールの読み込み中に予期せぬエラーが発生しました。")
+    st.error(f"エラー内容: {e}")
+    # 詳細なエラー情報を表示
+    st.code(traceback.format_exc())
     MODULES_LOADED = False
 
 # セッション状態の初期化
@@ -598,365 +602,33 @@ def render_upload_section():
             st.error(f"❌ データ統合エラー: {e}")
 
 def main():
-    """メイン関数 - デバッグ機能付き"""
+    """メイン関数（デバッグ用・簡易版）"""
     # セッション状態初期化
     initialize_session_state()
-    
-    # デバッグ情報表示
-    st.sidebar.markdown("### 🔍 デバッグ情報")
-    st.sidebar.write(f"MODULES_LOADED: {MODULES_LOADED}")
-    st.sidebar.write(f"current_view: {st.session_state.get('current_view', 'None')}")
-    st.sidebar.write(f"df_gas loaded: {st.session_state.get('df_gas') is not None}")
-    if st.session_state.get('df_gas') is not None:
-        st.sidebar.write(f"データ行数: {len(st.session_state['df_gas'])}")
-    
+
     # モジュールが読み込まれていない場合は終了
     if not MODULES_LOADED:
-        st.error("❌ 必要なモジュールが読み込まれていません")
-        st.info("以下のファイルが存在することを確認してください:")
-        required_modules = [
-            "loader.py", "analyzer.py", "monthly_quarterly_analyzer.py",
-            "target_loader.py", "plotter.py", "department_ranking.py", 
-            "surgeon_analyzer.py", "prediction_tab_enhanced.py"
-        ]
-        for module in required_modules:
-            st.write(f"- {module}")
         st.stop()
+
+    # --- デバッグのため、サイドバーとアップロード機能のみ有効化 ---
+    with st.sidebar:
+        st.title("🏥 手術分析")
+        st.markdown("---")
+        st.header("現在デバッグ中です")
+        st.info("データアップロード機能のみが有効です。")
     
-    # サイドバー描画
-    render_sidebar()
-    
-    # 現在のビューに応じてコンテンツを描画
-    current_view = st.session_state.get('current_view', 'dashboard')
-    
-    # デバッグ: どのビューが選択されているかを表示
-    st.write(f"🔍 **現在のビュー**: {current_view}")
-    
-    try:
-        if current_view == 'dashboard':
-            st.write("✅ ダッシュボードを表示中...")
-            render_main_dashboard()
-            
-        elif current_view == 'upload':
-            st.write("✅ データアップロードセクションを表示中...")
-            render_upload_section()
-            
-        elif current_view == 'hospital':
-            st.write("✅ 病院全体分析を表示中...")
-            # 病院全体分析機能
-            st.header("🏥 病院全体分析")
-            
-            if st.session_state.get('df_gas') is None:
-                st.warning("データをアップロードしてください。")
-                st.info("サイドバーの「📤 データアップロード」からCSVファイルを読み込んでください。")
-                return
-                
-            df_gas = st.session_state['df_gas']
-            target_dict = st.session_state.get('target_dict', {})
-            
-            st.success(f"✅ データ読み込み済み: {len(df_gas):,}件")
-            
-            # 基本的な列の存在確認
-            required_columns = ['手術実施日_dt', '実施診療科', '麻酔種別']
-            missing_columns = [col for col in required_columns if col not in df_gas.columns]
-            
-            if missing_columns:
-                st.error(f"❌ 必要な列が見つかりません: {missing_columns}")
-                st.write("**利用可能な列:**")
-                st.write(list(df_gas.columns))
-                return
-            
-            # 期間フィルタ
-            col1, col2 = st.columns(2)
-            with col1:
-                period_filter = st.selectbox("📅 分析期間", 
-                                           ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
-                                           index=1, key="hospital_period")
-            with col2:
-                view_type = st.selectbox("📊 表示形式", 
-                                       ["週次", "月次", "四半期"],
-                                       index=0, key="hospital_view")
-            
-            st.write(f"🔍 選択された期間: {period_filter}, 表示形式: {view_type}")
-            
-            # データフィルタリング
-            try:
-                filtered_df = filter_data_by_period(df_gas, period_filter)
-                st.success(f"✅ フィルタ後データ: {len(filtered_df):,}件")
-                
-                if filtered_df.empty:
-                    st.warning("選択された期間にデータがありません。")
-                    return
-                    
-            except Exception as e:
-                st.error(f"❌ データフィルタリングエラー: {str(e)}")
-                return
-            
-            # 病院全体サマリー
-            try:
-                if view_type == "週次":
-                    st.write("🔍 週次分析を実行中...")
-                    summary_data = analyze_hospital_summary(filtered_df)
-                    
-                    if not summary_data.empty:
-                        st.success(f"✅ 週次データ取得: {len(summary_data)}週分")
-                        
-                        # グラフ表示
-                        fig = plot_summary_graph(summary_data, "全科", target_dict, 4)
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # 統計テーブル
-                        st.subheader("📊 週次統計")
-                        st.dataframe(summary_data, use_container_width=True)
-                    else:
-                        st.warning("週次データが空です。")
-                        st.write("デバッグ情報:")
-                        st.write(f"- フィルタ後データ行数: {len(filtered_df)}")
-                        st.write(f"- データ期間: {filtered_df['手術実施日_dt'].min()} ～ {filtered_df['手術実施日_dt'].max()}")
-                
-                elif view_type == "月次":
-                    st.write("🔍 月次分析を実行中...")
-                    monthly_summary = analyze_monthly_summary(filtered_df)
-                    
-                    if not monthly_summary.empty:
-                        st.success(f"✅ 月次データ取得: {len(monthly_summary)}ヶ月分")
-                        
-                        # 月次グラフ
-                        fig = go.Figure()
-                        fig.add_trace(go.Scatter(
-                            x=monthly_summary['月'],
-                            y=monthly_summary['平日1日平均件数'],
-                            mode='lines+markers',
-                            name='月次推移',
-                            line=dict(width=3)
-                        ))
-                        fig.update_layout(
-                            title="病院全体 月次推移",
-                            xaxis_title="月",
-                            yaxis_title="平日1日平均件数",
-                            height=500
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # 月次統計テーブル
-                        st.subheader("📅 月次統計")
-                        st.dataframe(monthly_summary, use_container_width=True)
-                    else:
-                        st.warning("月次データが空です。")
-                
-                elif view_type == "四半期":
-                    st.write("🔍 四半期分析を実行中...")
-                    quarterly_summary = analyze_quarterly_summary(filtered_df)
-                    
-                    if not quarterly_summary.empty:
-                        st.success(f"✅ 四半期データ取得: {len(quarterly_summary)}四半期分")
-                        
-                        # 四半期グラフ
-                        fig = px.bar(
-                            quarterly_summary,
-                            x='四半期',
-                            y='平日1日平均件数',
-                            title="病院全体 四半期推移"
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # 四半期統計テーブル
-                        st.subheader("📈 四半期統計")
-                        st.dataframe(quarterly_summary, use_container_width=True)
-                    else:
-                        st.warning("四半期データが空です。")
-                        
-            except Exception as e:
-                st.error(f"❌ 分析処理エラー: {str(e)}")
-                st.write("エラー詳細:")
-                st.code(str(e))
-                return
-            
-            # 追加分析
-            st.subheader("🔍 詳細分析")
-            col1, col2 = st.columns(2)
-            
-            try:
-                with col1:
-                    # 診療科別件数分布
-                    dept_counts = filtered_df.groupby('実施診療科').size().sort_values(ascending=False).head(10)
-                    
-                    if not dept_counts.empty:
-                        fig_dept = px.bar(
-                            x=dept_counts.values,
-                            y=dept_counts.index,
-                            orientation='h',
-                            title="診療科別件数 (Top 10)"
-                        )
-                        fig_dept.update_layout(height=400)
-                        st.plotly_chart(fig_dept, use_container_width=True)
-                    else:
-                        st.warning("診療科データがありません。")
-                
-                with col2:
-                    # 曜日別分布
-                    if not filtered_df.empty:
-                        filtered_df_copy = filtered_df.copy()
-                        filtered_df_copy['曜日'] = filtered_df_copy['手術実施日_dt'].dt.day_name()
-                        weekday_dist = filtered_df_copy.groupby('曜日').size()
-                        
-                        if not weekday_dist.empty:
-                            fig_week = px.pie(
-                                values=weekday_dist.values,
-                                names=weekday_dist.index,
-                                title="曜日別手術件数分布"
-                            )
-                            fig_week.update_layout(height=400)
-                            st.plotly_chart(fig_week, use_container_width=True)
-                        else:
-                            st.warning("曜日別データがありません。")
-                            
-            except Exception as e:
-                st.error(f"❌ 詳細分析エラー: {str(e)}")
-        
-        elif current_view == 'department':
-            st.write("✅ 診療科別分析を表示中...")
-            # 診療科別分析機能
-            st.header("🩺 診療科別分析")
-            
-            if st.session_state.get('df_gas') is None:
-                st.warning("データをアップロードしてください。")
-                return
-                
-            df_gas = st.session_state['df_gas']
-            target_dict = st.session_state.get('target_dict', {})
-            
-            st.success(f"✅ データ読み込み済み: {len(df_gas):,}件")
-            
-            # 診療科リスト確認
-            departments = sorted(df_gas["実施診療科"].dropna().unique().tolist())
-            st.write(f"🔍 利用可能な診療科数: {len(departments)}")
-            
-            if not departments:
-                st.error("❌ 診療科データが見つかりません。")
-                return
-            
-            # フィルタ設定
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                selected_dept = st.selectbox("🏥 診療科選択", departments, key="dept_selector")
-            
-            with col2:
-                period_filter = st.selectbox("📅 分析期間", 
-                                           ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
-                                           index=1, key="dept_period")
-            with col3:
-                view_type = st.selectbox("📊 表示形式", 
-                                       ["週次", "月次", "四半期"],
-                                       index=0, key="dept_view")
-            
-            st.write(f"🔍 選択: {selected_dept}, {period_filter}, {view_type}")
-            
-            # データフィルタリング
-            try:
-                filtered_df = filter_data_by_period(df_gas, period_filter)
-                dept_data = filtered_df[filtered_df["実施診療科"] == selected_dept]
-                
-                st.write(f"🔍 フィルタ後: 全体{len(filtered_df)}件, 診療科別{len(dept_data)}件")
-                
-                if dept_data.empty:
-                    st.warning(f"選択された診療科「{selected_dept}」のデータが期間内に見つかりません。")
-                    return
-                
-                # 基本統計を表示
-                st.subheader(f"📊 {selected_dept} の基本情報")
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric("総データ件数", len(dept_data))
-                with col2:
-                    st.metric("データ期間(日)", (dept_data['手術実施日_dt'].max() - dept_data['手術実施日_dt'].min()).days + 1)
-                with col3:
-                    st.metric("ユニーク日数", dept_data['手術実施日_dt'].nunique())
-                
-                # 麻酔種別確認
-                if '麻酔種別' in dept_data.columns:
-                    anesthesia_types = dept_data['麻酔種別'].value_counts()
-                    st.write("🔍 麻酔種別分布:")
-                    st.dataframe(anesthesia_types)
-                
-                st.success("✅ 診療科別分析の基本表示が完了しました。")
-                
-            except Exception as e:
-                st.error(f"❌ 診療科別分析エラー: {str(e)}")
-                st.code(str(e))
-        
-        elif current_view == 'ranking':
-            st.write("✅ 診療科ランキングを表示中...")
-            st.header("🏆 診療科ランキング")
-            
-            if st.session_state.get('df_gas') is None:
-                st.warning("データをアップロードしてください。")
-                return
-                
-            df_gas = st.session_state['df_gas']
-            st.success(f"✅ データ読み込み済み: {len(df_gas):,}件")
-            
-            # 簡単なランキング表示
-            try:
-                dept_counts = df_gas.groupby('実施診療科').size().sort_values(ascending=False).head(10)
-                
-                st.subheader("📊 診療科別手術件数 Top 10")
-                st.dataframe(dept_counts)
-                
-                # 簡単なグラフ
-                fig = px.bar(
-                    x=dept_counts.values,
-                    y=dept_counts.index,
-                    orientation='h',
-                    title="診療科別手術件数 Top 10"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                
-            except Exception as e:
-                st.error(f"❌ ランキング表示エラー: {str(e)}")
-        
-        elif current_view == 'surgeon':
-            st.write("✅ 術者分析を表示中...")
-            st.header("👨‍⚕️ 術者分析")
-            if st.session_state.get('df_gas') is not None:
-                df_gas = st.session_state['df_gas']
-                target_dict = st.session_state.get('target_dict', {})
-                try:
-                    create_surgeon_analysis(df_gas, target_dict)
-                except Exception as e:
-                    st.error(f"❌ 術者分析エラー: {str(e)}")
-            else:
-                st.warning("データをアップロードしてください。")
-        
-        elif current_view == 'prediction':
-            st.write("✅ 将来予測を表示中...")
-            st.header("🔮 将来予測")
-            if st.session_state.get('df_gas') is not None:
-                df_gas = st.session_state['df_gas']
-                target_dict = st.session_state.get('target_dict', {})
-                latest_date = st.session_state.get('latest_date')
-                try:
-                    create_prediction_tab(df_gas, target_dict, latest_date)
-                except Exception as e:
-                    st.error(f"❌ 将来予測エラー: {str(e)}")
-            else:
-                st.warning("データをアップロードしてください。")
-                
-    except Exception as e:
-        st.error(f"❌ メイン処理でエラーが発生しました: {str(e)}")
-        st.write("**エラートレースバック:**")
-        import traceback
-        st.code(traceback.format_exc())
-        
-    # デバッグ情報をフッターに表示
-    st.markdown("---")
-    st.markdown("### 🔧 デバッグ情報")
-    st.write(f"**Streamlitバージョン**: {st.__version__}")
-    st.write(f"**セッション状態キー**: {list(st.session_state.keys())}")
-    if st.session_state.get('df_gas') is not None:
-        df = st.session_state['df_gas']
-        st.write(f"**データフレーム形状**: {df.shape}")
-        st.write(f"**列名**: {list(df.columns)}")
-        st.write(f"**データ型**:")
-        st.code(str(df.dtypes))
+    st.session_state['current_view'] = 'upload'
+    # ----------------------------------------------------
+
+    # メインコンテンツの描画
+    current_view = st.session_state.get('current_view')
+
+    if current_view == 'upload':
+        render_upload_section() # データアップロード画面のみを描画
+    else:
+        # 他のビューは一時的に無効化
+        st.header("現在この機能は無効化されています。")
+        st.info("デバッグのため、データアップロード機能のみ利用可能です。")
+
+if __name__ == "__main__":
+    main()
