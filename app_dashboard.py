@@ -602,33 +602,195 @@ def render_upload_section():
             st.error(f"❌ データ統合エラー: {e}")
 
 def main():
-    """メイン関数（デバッグ用・簡易版）"""
+    """メイン関数"""
     # セッション状態初期化
     initialize_session_state()
-
+    
     # モジュールが読み込まれていない場合は終了
     if not MODULES_LOADED:
         st.stop()
-
-    # --- デバッグのため、サイドバーとアップロード機能のみ有効化 ---
-    with st.sidebar:
-        st.title("🏥 手術分析")
-        st.markdown("---")
-        st.header("現在デバッグ中です")
-        st.info("データアップロード機能のみが有効です。")
     
-    st.session_state['current_view'] = 'upload'
-    # ----------------------------------------------------
-
-    # メインコンテンツの描画
-    current_view = st.session_state.get('current_view')
-
-    if current_view == 'upload':
-        render_upload_section() # データアップロード画面のみを描画
-    else:
-        # 他のビューは一時的に無効化
-        st.header("現在この機能は無効化されています。")
-        st.info("デバッグのため、データアップロード機能のみ利用可能です。")
+    # サイドバー描画
+    render_sidebar()
+    
+    # 現在のビューに応じてコンテンツを描画
+    current_view = st.session_state.get('current_view', 'dashboard')
+    
+    if current_view == 'dashboard':
+        render_main_dashboard()
+    elif current_view == 'upload':
+        render_upload_section()
+    elif current_view == 'hospital':
+        # 病院全体分析機能 - シンプル版
+        st.header("🏥 病院全体分析")
+        if st.session_state.get('df_gas') is not None:
+            df_gas = st.session_state['df_gas']
+            
+            # 基本情報表示
+            st.success(f"✅ データ読み込み済み: {len(df_gas):,}件")
+            
+            # 期間フィルタ
+            period_filter = st.selectbox("📅 分析期間", 
+                                       ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
+                                       index=1)
+            
+            # データフィルタリング
+            filtered_df = filter_data_by_period(df_gas, period_filter)
+            st.info(f"期間フィルタ後: {len(filtered_df):,}件")
+            
+            # 簡単な統計表示
+            if not filtered_df.empty:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("総手術件数", len(filtered_df))
+                with col2:
+                    st.metric("診療科数", filtered_df['実施診療科'].nunique())
+                with col3:
+                    data_days = (filtered_df['手術実施日_dt'].max() - filtered_df['手術実施日_dt'].min()).days + 1
+                    st.metric("データ日数", data_days)
+                
+                # 簡単なグラフ
+                dept_counts = filtered_df.groupby('実施診療科').size().sort_values(ascending=False).head(10)
+                fig = px.bar(
+                    x=dept_counts.values,
+                    y=dept_counts.index,
+                    orientation='h',
+                    title="診療科別手術件数 Top 10"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("選択された期間にデータがありません。")
+        else:
+            st.warning("データをアップロードしてください。")
+    
+    elif current_view == 'department':
+        # 診療科別分析機能 - シンプル版
+        st.header("🩺 診療科別分析")
+        if st.session_state.get('df_gas') is not None:
+            df_gas = st.session_state['df_gas']
+            
+            # 基本情報表示
+            st.success(f"✅ データ読み込み済み: {len(df_gas):,}件")
+            
+            # 診療科選択
+            departments = sorted(df_gas["実施診療科"].dropna().unique().tolist())
+            if departments:
+                selected_dept = st.selectbox("🏥 診療科選択", departments)
+                
+                # 期間フィルタ
+                period_filter = st.selectbox("📅 分析期間", 
+                                           ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
+                                           index=1)
+                
+                # データフィルタリング
+                filtered_df = filter_data_by_period(df_gas, period_filter)
+                dept_data = filtered_df[filtered_df["実施診療科"] == selected_dept]
+                
+                if not dept_data.empty:
+                    # 基本統計
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("手術件数", len(dept_data))
+                    with col2:
+                        avg_daily = len(dept_data) / 30
+                        st.metric("平日1日平均", f"{avg_daily:.1f}")
+                    with col3:
+                        data_days = (dept_data['手術実施日_dt'].max() - dept_data['手術実施日_dt'].min()).days + 1
+                        st.metric("データ期間", f"{data_days}日")
+                    
+                    # 日別推移
+                    daily_counts = dept_data.groupby(dept_data['手術実施日_dt'].dt.date).size()
+                    fig = px.line(
+                        x=daily_counts.index,
+                        y=daily_counts.values,
+                        title=f"{selected_dept} 日別手術件数推移"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # データテーブル
+                    st.subheader("📋 データサンプル")
+                    st.dataframe(dept_data.head(10), use_container_width=True)
+                else:
+                    st.warning(f"選択された診療科「{selected_dept}」のデータが期間内に見つかりません。")
+            else:
+                st.error("診療科データが見つかりません。")
+        else:
+            st.warning("データをアップロードしてください。")
+    
+    elif current_view == 'ranking':
+        # 診療科ランキング機能 - シンプル版
+        st.header("🏆 診療科ランキング")
+        if st.session_state.get('df_gas') is not None:
+            df_gas = st.session_state['df_gas']
+            
+            # 基本情報表示
+            st.success(f"✅ データ読み込み済み: {len(df_gas):,}件")
+            
+            # 期間フィルタ
+            period_filter = st.selectbox("📅 分析期間", 
+                                       ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
+                                       index=1)
+            
+            # データフィルタリング
+            filtered_df = filter_data_by_period(df_gas, period_filter)
+            
+            if not filtered_df.empty:
+                # 手術件数ランキング
+                dept_counts = filtered_df.groupby('実施診療科').size().sort_values(ascending=False)
+                
+                # ランキング表
+                st.subheader("📊 診療科別手術件数ランキング")
+                ranking_df = pd.DataFrame({
+                    '順位': range(1, len(dept_counts) + 1),
+                    '診療科': dept_counts.index,
+                    '手術件数': dept_counts.values,
+                    '全体比率(%)': (dept_counts.values / dept_counts.sum() * 100).round(1)
+                })
+                st.dataframe(ranking_df, use_container_width=True)
+                
+                # ランキンググラフ
+                fig = px.bar(
+                    x=dept_counts.head(15).values,
+                    y=dept_counts.head(15).index,
+                    orientation='h',
+                    title="診療科別手術件数ランキング Top 15"
+                )
+                fig.update_layout(height=600)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # 統計情報
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("診療科数", len(dept_counts))
+                with col2:
+                    st.metric("総手術件数", dept_counts.sum())
+                with col3:
+                    st.metric("平均件数/科", f"{dept_counts.mean():.1f}")
+            else:
+                st.warning("選択された期間にデータがありません。")
+        else:
+            st.warning("データをアップロードしてください。")
+    
+    elif current_view == 'surgeon':
+        # 術者分析機能
+        st.header("👨‍⚕️ 術者分析")
+        if st.session_state.get('df_gas') is not None:
+            df_gas = st.session_state['df_gas']
+            target_dict = st.session_state.get('target_dict', {})
+            create_surgeon_analysis(df_gas, target_dict)
+        else:
+            st.warning("データをアップロードしてください。")
+    
+    elif current_view == 'prediction':
+        # 将来予測機能
+        st.header("🔮 将来予測")
+        if st.session_state.get('df_gas') is not None:
+            df_gas = st.session_state['df_gas']
+            target_dict = st.session_state.get('target_dict', {})
+            latest_date = st.session_state.get('latest_date')
+            create_prediction_tab(df_gas, target_dict, latest_date)
+        else:
+            st.warning("データをアップロードしてください。")
 
 if __name__ == "__main__":
     main()
