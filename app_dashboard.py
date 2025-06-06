@@ -135,9 +135,9 @@ try:
     from monthly_quarterly_analyzer import analyze_monthly_summary, analyze_quarterly_summary
     from target_loader import load_target_file
     from plotter import plot_summary_graph, plot_department_graph
-    # from department_ranking import calculate_department_achievement_rates, plot_achievement_ranking
-    # from surgeon_analyzer import create_surgeon_analysis
-    # from prediction_tab_enhanced import create_prediction_tab
+    from department_ranking import calculate_department_achievement_rates, plot_achievement_ranking
+    from surgeon_analyzer import create_surgeon_analysis
+    from prediction_tab_enhanced import create_prediction_tab
     
     MODULES_LOADED = True
 except Exception as e:
