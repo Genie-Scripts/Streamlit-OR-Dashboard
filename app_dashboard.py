@@ -621,158 +621,518 @@ def main():
     elif current_view == 'upload':
         render_upload_section()
     elif current_view == 'hospital':
-        # 病院全体分析機能 - シンプル版
+        # 病院全体分析機能
         st.header("🏥 病院全体分析")
         if st.session_state.get('df_gas') is not None:
             df_gas = st.session_state['df_gas']
-            
-            # 基本情報表示
-            st.success(f"✅ データ読み込み済み: {len(df_gas):,}件")
+            target_dict = st.session_state.get('target_dict', {})
             
             # 期間フィルタ
-            period_filter = st.selectbox("📅 分析期間", 
-                                       ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
-                                       index=1)
+            col1, col2 = st.columns(2)
+            with col1:
+                period_filter = st.selectbox("📅 分析期間", 
+                                           ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
+                                           index=1, key="hospital_period")
+            with col2:
+                view_type = st.selectbox("📊 表示形式", 
+                                       ["週次", "月次", "四半期"],
+                                       index=0, key="hospital_view")
             
             # データフィルタリング
             filtered_df = filter_data_by_period(df_gas, period_filter)
-            st.info(f"期間フィルタ後: {len(filtered_df):,}件")
             
-            # 簡単な統計表示
-            if not filtered_df.empty:
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("総手術件数", len(filtered_df))
-                with col2:
-                    st.metric("診療科数", filtered_df['実施診療科'].nunique())
-                with col3:
-                    data_days = (filtered_df['手術実施日_dt'].max() - filtered_df['手術実施日_dt'].min()).days + 1
-                    st.metric("データ日数", data_days)
-                
-                # 簡単なグラフ
-                dept_counts = filtered_df.groupby('実施診療科').size().sort_values(ascending=False).head(10)
-                fig = px.bar(
-                    x=dept_counts.values,
-                    y=dept_counts.index,
-                    orientation='h',
-                    title="診療科別手術件数 Top 10"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("選択された期間にデータがありません。")
-        else:
-            st.warning("データをアップロードしてください。")
-    
-    elif current_view == 'department':
-        # 診療科別分析機能 - シンプル版
-        st.header("🩺 診療科別分析")
-        if st.session_state.get('df_gas') is not None:
-            df_gas = st.session_state['df_gas']
-            
-            # 基本情報表示
-            st.success(f"✅ データ読み込み済み: {len(df_gas):,}件")
-            
-            # 診療科選択
-            departments = sorted(df_gas["実施診療科"].dropna().unique().tolist())
-            if departments:
-                selected_dept = st.selectbox("🏥 診療科選択", departments)
-                
-                # 期間フィルタ
-                period_filter = st.selectbox("📅 分析期間", 
-                                           ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
-                                           index=1)
-                
-                # データフィルタリング
-                filtered_df = filter_data_by_period(df_gas, period_filter)
-                dept_data = filtered_df[filtered_df["実施診療科"] == selected_dept]
-                
-                if not dept_data.empty:
-                    # 基本統計
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("手術件数", len(dept_data))
-                    with col2:
-                        avg_daily = len(dept_data) / 30
-                        st.metric("平日1日平均", f"{avg_daily:.1f}")
-                    with col3:
-                        data_days = (dept_data['手術実施日_dt'].max() - dept_data['手術実施日_dt'].min()).days + 1
-                        st.metric("データ期間", f"{data_days}日")
+            # 病院全体サマリー
+            if view_type == "週次":
+                summary_data = analyze_hospital_summary(filtered_df)
+                if not summary_data.empty:
+                    # グラフ表示
+                    fig = plot_summary_graph(summary_data, "全科", target_dict, 4)
+                    st.plotly_chart(fig, use_container_width=True)
                     
-                    # 日別推移
-                    daily_counts = dept_data.groupby(dept_data['手術実施日_dt'].dt.date).size()
-                    fig = px.line(
-                        x=daily_counts.index,
-                        y=daily_counts.values,
-                        title=f"{selected_dept} 日別手術件数推移"
+                    # 統計テーブル
+                    st.subheader("📊 週次統計")
+                    st.dataframe(summary_data, use_container_width=True)
+                else:
+                    st.warning("表示可能なデータがありません。")
+            
+            elif view_type == "月次":
+                monthly_summary = analyze_monthly_summary(filtered_df)
+                if not monthly_summary.empty:
+                    # 月次グラフ
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=monthly_summary['月'],
+                        y=monthly_summary['平日1日平均件数'],
+                        mode='lines+markers',
+                        name='月次推移',
+                        line=dict(width=3)
+                    ))
+                    fig.update_layout(
+                        title="病院全体 月次推移",
+                        xaxis_title="月",
+                        yaxis_title="平日1日平均件数",
+                        height=500
                     )
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    # データテーブル
-                    st.subheader("📋 データサンプル")
-                    st.dataframe(dept_data.head(10), use_container_width=True)
+                    # 月次統計テーブル
+                    st.subheader("📅 月次統計")
+                    st.dataframe(monthly_summary, use_container_width=True)
                 else:
-                    st.warning(f"選択された診療科「{selected_dept}」のデータが期間内に見つかりません。")
-            else:
-                st.error("診療科データが見つかりません。")
+                    st.warning("表示可能なデータがありません。")
+            
+            elif view_type == "四半期":
+                quarterly_summary = analyze_quarterly_summary(filtered_df)
+                if not quarterly_summary.empty:
+                    # 四半期グラフ
+                    fig = px.bar(
+                        quarterly_summary,
+                        x='四半期',
+                        y='平日1日平均件数',
+                        title="病院全体 四半期推移"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # 四半期統計テーブル
+                    st.subheader("📈 四半期統計")
+                    st.dataframe(quarterly_summary, use_container_width=True)
+                else:
+                    st.warning("表示可能なデータがありません。")
+            
+            # 追加分析
+            st.subheader("🔍 詳細分析")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # 診療科別件数分布
+                dept_counts = filtered_df.groupby('実施診療科').size().sort_values(ascending=False).head(10)
+                fig_dept = px.bar(
+                    x=dept_counts.values,
+                    y=dept_counts.index,
+                    orientation='h',
+                    title="診療科別件数 (Top 10)"
+                )
+                fig_dept.update_layout(height=400)
+                st.plotly_chart(fig_dept, use_container_width=True)
+            
+            with col2:
+                # 曜日別分布
+                if not filtered_df.empty:
+                    filtered_df['曜日'] = filtered_df['手術実施日_dt'].dt.day_name()
+                    weekday_dist = filtered_df.groupby('曜日').size()
+                    fig_week = px.pie(
+                        values=weekday_dist.values,
+                        names=weekday_dist.index,
+                        title="曜日別手術件数分布"
+                    )
+                    fig_week.update_layout(height=400)
+                    st.plotly_chart(fig_week, use_container_width=True)
         else:
             st.warning("データをアップロードしてください。")
-    
+    elif current_view == 'department':
+        # 診療科別分析機能
+        st.header("🩺 診療科別分析")
+        if st.session_state.get('df_gas') is not None:
+            df_gas = st.session_state['df_gas']
+            target_dict = st.session_state.get('target_dict', {})
+            
+            # フィルタ設定
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                departments = sorted(df_gas["実施診療科"].dropna().unique().tolist())
+                selected_dept = st.selectbox("🏥 診療科選択", departments, key="dept_selector")
+            
+            with col2:
+                period_filter = st.selectbox("📅 分析期間", 
+                                           ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
+                                           index=1, key="dept_period")
+            with col3:
+                view_type = st.selectbox("📊 表示形式", 
+                                       ["週次", "月次", "四半期"],
+                                       index=0, key="dept_view")
+            
+            # データフィルタリング
+            filtered_df = filter_data_by_period(df_gas, period_filter)
+            dept_data = filtered_df[filtered_df["実施診療科"] == selected_dept]
+            
+            if dept_data.empty:
+                st.warning(f"選択された診療科「{selected_dept}」のデータが期間内に見つかりません。")
+                return
+            
+            # KPI表示
+            st.subheader(f"📊 {selected_dept} の主要指標")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            # 全身麻酔20分以上の件数
+            gas_cases = len(dept_data[
+                dept_data['麻酔種別'].str.contains("全身麻酔", na=False) &
+                dept_data['麻酔種別'].str.contains("20分以上", na=False)
+            ])
+            
+            with col1:
+                st.metric("総手術件数", f"{gas_cases:,}")
+            
+            with col2:
+                avg_daily = gas_cases / 30 if gas_cases > 0 else 0
+                st.metric("平日1日平均", f"{avg_daily:.1f}")
+            
+            with col3:
+                if selected_dept in target_dict:
+                    target_val = target_dict[selected_dept]
+                    weekly_avg = avg_daily * 7
+                    achievement = (weekly_avg / target_val * 100) if target_val > 0 else 0
+                    st.metric("目標達成率", f"{achievement:.1f}%")
+                else:
+                    unique_surgeons = dept_data["実施術者"].nunique() if "実施術者" in dept_data.columns else 0
+                    st.metric("術者数", f"{unique_surgeons}")
+            
+            with col4:
+                data_days = (dept_data['手術実施日_dt'].max() - dept_data['手術実施日_dt'].min()).days + 1
+                st.metric("データ期間", f"{data_days}日")
+            
+            # グラフ表示
+            st.subheader(f"📈 {selected_dept} の推移分析")
+            
+            if view_type == "週次":
+                summary_data = analyze_department_summary(filtered_df, selected_dept)
+                if not summary_data.empty:
+                    fig = plot_department_graph(summary_data, selected_dept, target_dict, 4)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # 詳細統計
+                    st.subheader("📋 週次詳細統計")
+                    st.dataframe(summary_data, use_container_width=True)
+                else:
+                    st.warning("週次データが不足しています。")
+            
+            elif view_type == "月次":
+                # 診療科の月次分析
+                dept_data['年月'] = dept_data['手術実施日_dt'].dt.to_period('M')
+                monthly_stats = dept_data.groupby('年月').agg({
+                    '手術実施日_dt': 'count'
+                }).rename(columns={'手術実施日_dt': '総件数'})
+                
+                # 平日日数を計算（簡易版）
+                monthly_stats['平日1日平均件数'] = monthly_stats['総件数'] / 22  # 平均的な平日数
+                
+                if not monthly_stats.empty:
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=[str(x) for x in monthly_stats.index],
+                        y=monthly_stats['平日1日平均件数'],
+                        mode='lines+markers',
+                        name=selected_dept,
+                        line=dict(width=3)
+                    ))
+                    
+                    # 目標線を追加
+                    if selected_dept in target_dict:
+                        target_line = target_dict[selected_dept] / 7  # 週目標を日次に変換
+                        fig.add_hline(y=target_line, line_dash="dash", 
+                                    annotation_text=f"目標: {target_line:.1f}/日")
+                    
+                    fig.update_layout(
+                        title=f"{selected_dept} 月次推移",
+                        xaxis_title="月",
+                        yaxis_title="平日1日平均件数",
+                        height=500
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # 月次統計テーブル
+                    st.subheader("📅 月次統計")
+                    st.dataframe(monthly_stats, use_container_width=True)
+            
+            # 追加分析
+            st.subheader("🔍 詳細分析")
+            tab1, tab2, tab3 = st.tabs(["👨‍⚕️ 術者分析", "📅 時間分析", "📊 統計情報"])
+            
+            with tab1:
+                if "実施術者" in dept_data.columns:
+                    surgeon_stats = dept_data.groupby("実施術者").size().sort_values(ascending=False).head(10)
+                    
+                    fig_surgeon = px.bar(
+                        x=surgeon_stats.values,
+                        y=surgeon_stats.index,
+                        orientation='h',
+                        title=f"{selected_dept} 術者別件数 (Top 10)"
+                    )
+                    fig_surgeon.update_layout(height=400)
+                    st.plotly_chart(fig_surgeon, use_container_width=True)
+                    
+                    # 術者統計テーブル
+                    surgeon_df = pd.DataFrame({
+                        '術者': surgeon_stats.index,
+                        '件数': surgeon_stats.values,
+                        '割合(%)': (surgeon_stats.values / surgeon_stats.sum() * 100).round(1)
+                    })
+                    st.dataframe(surgeon_df, use_container_width=True)
+                else:
+                    st.info("術者情報が利用できません。")
+            
+            with tab2:
+                # 曜日別・時間別分析
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # 曜日別分布
+                    dept_data['曜日'] = dept_data['手術実施日_dt'].dt.day_name()
+                    weekday_dist = dept_data.groupby('曜日').size()
+                    
+                    fig_week = px.pie(
+                        values=weekday_dist.values,
+                        names=weekday_dist.index,
+                        title="曜日別手術分布"
+                    )
+                    fig_week.update_layout(height=400)
+                    st.plotly_chart(fig_week, use_container_width=True)
+                
+                with col2:
+                    # 月別トレンド
+                    dept_data['月'] = dept_data['手術実施日_dt'].dt.month
+                    monthly_dist = dept_data.groupby('月').size()
+                    
+                    fig_month = px.bar(
+                        x=monthly_dist.index,
+                        y=monthly_dist.values,
+                        title="月別手術件数"
+                    )
+                    fig_month.update_layout(height=400)
+                    st.plotly_chart(fig_month, use_container_width=True)
+            
+            with tab3:
+                # 基本統計情報
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("📊 基本統計")
+                    st.write(f"**データ期間**: {dept_data['手術実施日_dt'].min().strftime('%Y/%m/%d')} ～ {dept_data['手術実施日_dt'].max().strftime('%Y/%m/%d')}")
+                    st.write(f"**総手術日数**: {dept_data['手術実施日_dt'].nunique()}日")
+                    st.write(f"**総手術件数**: {len(dept_data)}件")
+                    st.write(f"**1日最大件数**: {dept_data.groupby('手術実施日_dt').size().max()}件")
+                    st.write(f"**1日平均件数**: {dept_data.groupby('手術実施日_dt').size().mean():.1f}件")
+                
+                with col2:
+                    st.write("🎯 目標関連")
+                    if selected_dept in target_dict:
+                        target_val = target_dict[selected_dept]
+                        st.write(f"**週間目標**: {target_val}件")
+                        st.write(f"**日次目標**: {target_val/7:.1f}件")
+                        
+                        current_weekly = avg_daily * 7
+                        st.write(f"**現在週平均**: {current_weekly:.1f}件")
+                        
+                        gap = current_weekly - target_val
+                        if gap >= 0:
+                            st.success(f"**目標との差**: +{gap:.1f}件 (達成)")
+                        else:
+                            st.warning(f"**目標との差**: {gap:.1f}件 (未達)")
+                    else:
+                        st.info("この診療科の目標は設定されていません。")
+        else:
+            st.warning("データをアップロードしてください。")
     elif current_view == 'ranking':
-        # 診療科ランキング機能 - シンプル版
+        # 診療科ランキング機能
         st.header("🏆 診療科ランキング")
         if st.session_state.get('df_gas') is not None:
             df_gas = st.session_state['df_gas']
-            
-            # 基本情報表示
-            st.success(f"✅ データ読み込み済み: {len(df_gas):,}件")
+            target_dict = st.session_state.get('target_dict', {})
             
             # 期間フィルタ
-            period_filter = st.selectbox("📅 分析期間", 
-                                       ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
-                                       index=1)
+            col1, col2 = st.columns(2)
+            with col1:
+                period_filter = st.selectbox("📅 分析期間", 
+                                           ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
+                                           index=1, key="ranking_period")
+            with col2:
+                ranking_type = st.selectbox("🏆 ランキング種別", 
+                                          ["手術件数", "目標達成率", "平日1日平均"],
+                                          key="ranking_type")
             
             # データフィルタリング
             filtered_df = filter_data_by_period(df_gas, period_filter)
             
-            if not filtered_df.empty:
+            if ranking_type == "目標達成率" and target_dict:
+                # 目標達成率ランキング
+                achievement_rates, achievement_summary = calculate_department_achievement_rates(filtered_df, target_dict)
+                
+                if not achievement_rates.empty:
+                    # ランキンググラフ
+                    fig_rank = plot_achievement_ranking(achievement_rates, 15)
+                    st.plotly_chart(fig_rank, use_container_width=True)
+                    
+                    # ランキングテーブル
+                    st.subheader("📊 目標達成率ランキング")
+                    
+                    # 色付きランキング表示
+                    def color_achievement(val):
+                        if val >= 100:
+                            return 'background-color: #d4edda'  # 緑
+                        elif val >= 80:
+                            return 'background-color: #fff3cd'  # 黄
+                        else:
+                            return 'background-color: #f8d7da'  # 赤
+                    
+                    styled_df = achievement_rates.style.applymap(
+                        color_achievement, subset=['目標達成率(%)']
+                    ).format({'目標達成率(%)': '{:.1f}%'})
+                    
+                    st.dataframe(styled_df, use_container_width=True)
+                    
+                    # サマリー統計
+                    if not achievement_summary.empty:
+                        st.subheader("📈 達成状況サマリー")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        total_depts = len(achievement_rates)
+                        achieved_depts = len(achievement_rates[achievement_rates['目標達成率(%)'] >= 100])
+                        avg_achievement = achievement_rates['目標達成率(%)'].mean()
+                        
+                        with col1:
+                            st.metric("目標達成診療科", f"{achieved_depts}/{total_depts}")
+                        with col2:
+                            st.metric("達成率", f"{achieved_depts/total_depts*100:.1f}%")
+                        with col3:
+                            st.metric("平均達成率", f"{avg_achievement:.1f}%")
+                else:
+                    st.warning("目標達成率を計算できませんでした。")
+            
+            elif ranking_type == "手術件数":
                 # 手術件数ランキング
                 dept_counts = filtered_df.groupby('実施診療科').size().sort_values(ascending=False)
                 
-                # ランキング表
-                st.subheader("📊 診療科別手術件数ランキング")
+                # グラフ表示
+                fig = px.bar(
+                    x=dept_counts.head(15).values,
+                    y=dept_counts.head(15).index,
+                    orientation='h',
+                    title=f"診療科別手術件数ランキング (Top 15) - {period_filter}",
+                    labels={'x': '手術件数', 'y': '診療科'}
+                )
+                fig.update_layout(height=600)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # テーブル表示
+                st.subheader("📋 手術件数ランキング")
                 ranking_df = pd.DataFrame({
                     '順位': range(1, len(dept_counts) + 1),
                     '診療科': dept_counts.index,
                     '手術件数': dept_counts.values,
                     '全体比率(%)': (dept_counts.values / dept_counts.sum() * 100).round(1)
                 })
+                
                 st.dataframe(ranking_df, use_container_width=True)
                 
-                # ランキンググラフ
-                fig = px.bar(
-                    x=dept_counts.head(15).values,
-                    y=dept_counts.head(15).index,
-                    orientation='h',
-                    title="診療科別手術件数ランキング Top 15"
-                )
-                fig.update_layout(height=600)
-                st.plotly_chart(fig, use_container_width=True)
-                
                 # 統計情報
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("診療科数", len(dept_counts))
+                    st.metric("総診療科数", len(dept_counts))
                 with col2:
                     st.metric("総手術件数", dept_counts.sum())
                 with col3:
                     st.metric("平均件数/科", f"{dept_counts.mean():.1f}")
-            else:
-                st.warning("選択された期間にデータがありません。")
+                with col4:
+                    st.metric("最多診療科", f"{dept_counts.iloc[0]}件")
+            
+            elif ranking_type == "平日1日平均":
+                # 平日1日平均ランキング
+                recent_averages = calculate_recent_averages(filtered_df)
+                
+                if not recent_averages.empty:
+                    # 直近30日のデータを取得
+                    recent_30d = recent_averages[recent_averages["期間"] == "直近30日"]
+                    
+                    if not recent_30d.empty:
+                        # ランキング作成
+                        dept_avg = recent_30d.set_index('診療科')['平日1日平均件数'].sort_values(ascending=False)
+                        
+                        # グラフ表示
+                        fig = px.bar(
+                            x=dept_avg.head(15).values,
+                            y=dept_avg.head(15).index,
+                            orientation='h',
+                            title="診療科別平日1日平均件数ランキング (Top 15)",
+                            labels={'x': '平日1日平均件数', 'y': '診療科'}
+                        )
+                        fig.update_layout(height=600)
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # テーブル表示
+                        st.subheader("📈 平日1日平均ランキング")
+                        avg_ranking_df = pd.DataFrame({
+                            '順位': range(1, len(dept_avg) + 1),
+                            '診療科': dept_avg.index,
+                            '平日1日平均件数': dept_avg.values.round(2)
+                        })
+                        
+                        st.dataframe(avg_ranking_df, use_container_width=True)
+                        
+                        # 統計情報
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("対象診療科数", len(dept_avg))
+                        with col2:
+                            st.metric("全体平均", f"{dept_avg.mean():.2f}")
+                        with col3:
+                            st.metric("最高平均", f"{dept_avg.iloc[0]:.2f}")
+                        with col4:
+                            st.metric("最低平均", f"{dept_avg.iloc[-1]:.2f}")
+                    else:
+                        st.warning("直近30日のデータが見つかりません。")
+                else:
+                    st.warning("平均データを計算できませんでした。")
+            
+            # 追加分析
+            st.subheader("🔍 詳細分析")
+            
+            # 診療科の相関分析
+            if len(filtered_df) > 0:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("📊 診療科分布")
+                    dept_dist = filtered_df['実施診療科'].value_counts()
+                    fig_pie = px.pie(
+                        values=dept_dist.head(10).values,
+                        names=dept_dist.head(10).index,
+                        title="手術件数分布 (Top 10)"
+                    )
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                
+                with col2:
+                    st.write("📈 成長率分析")
+                    # 簡易的な成長率計算（前半期 vs 後半期）
+                    filtered_df_sorted = filtered_df.sort_values('手術実施日_dt')
+                    mid_point = len(filtered_df_sorted) // 2
+                    
+                    first_half = filtered_df_sorted.iloc[:mid_point]
+                    second_half = filtered_df_sorted.iloc[mid_point:]
+                    
+                    first_counts = first_half.groupby('実施診療科').size()
+                    second_counts = second_half.groupby('実施診療科').size()
+                    
+                    # 共通の診療科のみで成長率計算
+                    common_depts = set(first_counts.index) & set(second_counts.index)
+                    growth_rates = {}
+                    
+                    for dept in common_depts:
+                        if first_counts[dept] > 0:
+                            growth = ((second_counts[dept] - first_counts[dept]) / first_counts[dept] * 100)
+                            growth_rates[dept] = growth
+                    
+                    if growth_rates:
+                        growth_df = pd.DataFrame({
+                            '診療科': list(growth_rates.keys()),
+                            '成長率(%)': list(growth_rates.values())
+                        }).sort_values('成長率(%)', ascending=False)
+                        
+                        st.dataframe(growth_df.head(10), use_container_width=True)
+                    else:
+                        st.info("成長率分析に十分なデータがありません。")
         else:
             st.warning("データをアップロードしてください。")
-    
     elif current_view == 'surgeon':
-        # 術者分析機能
+        # 既存の術者分析機能を呼び出し
         st.header("👨‍⚕️ 術者分析")
         if st.session_state.get('df_gas') is not None:
             df_gas = st.session_state['df_gas']
@@ -780,9 +1140,8 @@ def main():
             create_surgeon_analysis(df_gas, target_dict)
         else:
             st.warning("データをアップロードしてください。")
-    
     elif current_view == 'prediction':
-        # 将来予測機能
+        # 既存の将来予測機能を呼び出し
         st.header("🔮 将来予測")
         if st.session_state.get('df_gas') is not None:
             df_gas = st.session_state['df_gas']
