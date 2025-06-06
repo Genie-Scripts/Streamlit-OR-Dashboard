@@ -1,0 +1,17 @@
+streamlit
+pandas
+plotly
+jpholiday
+numpy~=1.26.0
+statsmodels>=0.14.0
+scipy>=1.10.0
+scikit-learn>=1.2.0
+cython>=3.0
+pmdarima==2.0.4
+pytz
+kaleido
+reportlab
+matplotlib
+watchdog
+openpyxl    # ← これを追加
+seaborn
