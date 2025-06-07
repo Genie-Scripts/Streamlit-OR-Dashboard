@@ -594,7 +594,7 @@ def plot_weekly_department_graph(summary_data, department, target_dict):
     
     return fig
     
-def create_department_dashboard(df_gas, target_dict, latest_date):
+def create_department_dashboard_weekly(df_gas, target_dict, latest_date):
     """診療科パフォーマンスダッシュボード（週単位対応版）"""
     
     # 直近4週のデータを取得
