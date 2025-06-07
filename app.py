@@ -447,8 +447,8 @@ def create_comprehensive_surgeon_analysis(df_gas, target_dict):
         )
         fig_all.update_traces(texttemplate='%{text:.1f}', textposition='outside')
         fig_all.update_layout(height=900, showlegend=False)
-        fig_all.update_xaxis(title="手術件数")
-        fig_all.update_yaxis(title="術者", categoryorder='total ascending')
+        fig_all.update_xaxes(title="手術件数")
+        fig_all.update_yaxes(title="術者", categoryorder='total ascending')
         st.plotly_chart(fig_all, use_container_width=True)
     
     with col2:
@@ -1261,8 +1261,8 @@ def render_department_analysis():
             )
             fig_surgeon.update_traces(texttemplate='%{text:.1f}', textposition='outside')
             fig_surgeon.update_layout(height=500, showlegend=False)
-            fig_surgeon.update_xaxis(title="手術件数")
-            fig_surgeon.update_yaxis(title="術者", categoryorder='total ascending')
+            fig_surgeon.update_xaxes(title="手術件数")
+            fig_surgeon.update_yaxes(title="術者", categoryorder='total ascending')
             st.plotly_chart(fig_surgeon, use_container_width=True)
             
             # 詳細テーブル
