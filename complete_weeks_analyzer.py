@@ -127,6 +127,352 @@ def add_week_columns(df):
     
     return df
 
+def analyze_department_weekly_summary_complete(df, department, target_dict=None, latest_date=None):
+    """特定診療科の週単位サマリー分析（完全週データ版）"""
+    if df.empty:
+        return pd.DataFrame()
+    
+    # 診療科でフィルタリング
+    dept_df = df[df['実施診療科'] == department].copy()
+    
+    if dept_df.empty:
+        return pd.DataFrame()
+    
+    # 完全な週のデータのみを使用
+    if latest_date:
+        analysis_end_sunday = get_latest_complete_sunday(latest_date)
+        dept_df = dept_df[dept_df['手術実施日_dt'] <= analysis_end_sunday]
+    
+    # 週関連列を追加
+    df_with_weeks = add_week_columns(dept_df)
+    
+    # 全身麻酔手術のフィルタリング
+    gas_df = df_with_weeks[
+        df_with_weeks['麻酔種別'].str.contains("全身麻酔", na=False) &
+        df_with_weeks['麻酔種別'].str.contains("20分以上", na=False)
+    ]
+    
+    # 週ごとの集計
+    weekly_summary = []
+    
+    for week_start, week_data in gas_df.groupby('週開始日'):
+        week_end = week_start + timedelta(days=6)
+        
+        # 平日のみの件数
+        weekday_data = week_data[week_data['平日フラグ']]
+        week_weekday = len(weekday_data)
+        
+        # 平日日数
+        weekday_count = len([d for d in pd.date_range(week_start, week_end) 
+                           if d.weekday() < 5])
+        
+        # 平日1日平均
+        daily_avg = week_weekday / weekday_count if weekday_count > 0 else 0
+        
+        weekly_summary.append({
+            '週開始日': week_start,
+            '週終了日': week_end,
+            '週ラベル': f"{week_start.strftime('%m/%d')}～{week_end.strftime('%m/%d')}",
+            'ISO週ラベル': week_data['ISO週ラベル'].iloc[0],
+            '診療科': department,
+            '週件数': week_weekday,
+            '平日日数': weekday_count,
+            '平日1日平均': round(daily_avg, 1)
+        })
+    
+    summary_df = pd.DataFrame(weekly_summary)
+    summary_df = summary_df.sort_values('週開始日')
+    
+    # 目標との比較
+    if target_dict and department in target_dict:
+        dept_target = target_dict[department]
+        summary_df['目標件数'] = dept_target
+        summary_df['達成率'] = (summary_df['週件数'] / dept_target * 100).round(1)
+        summary_df['目標差'] = summary_df['週件数'] - dept_target
+    
+    return summary_df
+
+def plot_weekly_summary_graph_complete(summary_data, title, target_dict, show_incomplete_warning=True):
+    """週次サマリーグラフの描画（完全週データ版）"""
+    import plotly.graph_objects as go
+    
+    fig = go.Figure()
+    
+    # 実績線
+    fig.add_trace(go.Scatter(
+        x=summary_data['週ラベル'],
+        y=summary_data['平日件数'],
+        mode='lines+markers',
+        name='週次実績（完全週データ）',
+        line=dict(color='#1f77b4', width=3),
+        marker=dict(size=8),
+        hovertemplate='週: %{x}<br>件数: %{y}<br>完全週データ<extra></extra>'
+    ))
+    
+    # 目標線（全科の場合）
+    if '目標件数' in summary_data.columns:
+        fig.add_trace(go.Scatter(
+            x=summary_data['週ラベル'],
+            y=summary_data['目標件数'],
+            mode='lines',
+            name='週次目標',
+            line=dict(color='#ff7f0e', width=2, dash='dash'),
+            hovertemplate='目標: %{y}件<extra></extra>'
+        ))
+    
+    fig.update_layout(
+        title=f"{title} - 週次推移（完全週データ使用）",
+        xaxis_title="週",
+        yaxis_title="件数",
+        height=500,
+        hovermode='x unified',
+        annotations=[
+            dict(
+                x=0.02,
+                y=0.98,
+                xref='paper',
+                yref='paper',
+                text='※完全週（月〜日）データのみ使用',
+                showarrow=False,
+                font=dict(size=10, color='gray'),
+                bgcolor='rgba(255,255,255,0.8)'
+            )
+        ]
+    )
+    
+    return fig
+
+def plot_weekly_department_graph_complete(summary_data, department, target_dict, show_incomplete_warning=True):
+    """診療科別週次グラフの描画（完全週データ版）"""
+    import plotly.graph_objects as go
+    
+    fig = go.Figure()
+    
+    # 実績線
+    fig.add_trace(go.Scatter(
+        x=summary_data['週ラベル'],
+        y=summary_data['週件数'],
+        mode='lines+markers',
+        name=f'{department} 週次実績（完全週）',
+        line=dict(color='#2ca02c', width=3),
+        marker=dict(size=8),
+        hovertemplate='週: %{x}<br>件数: %{y}<br>完全週データ<extra></extra>'
+    ))
+    
+    # 目標線
+    if department in target_dict:
+        target_value = target_dict[department]
+        fig.add_hline(
+            y=target_value,
+            line_dash="dash",
+            line_color="#ff7f0e",
+            annotation_text=f"目標: {target_value}件/週"
+        )
+    
+    fig.update_layout(
+        title=f"{department} - 週次推移（完全週データ使用）",
+        xaxis_title="週",
+        yaxis_title="件数",
+        height=500,
+        hovermode='x unified',
+        annotations=[
+            dict(
+                x=0.02,
+                y=0.98,
+                xref='paper',
+                yref='paper',
+                text='※完全週（月〜日）データのみ使用',
+                showarrow=False,
+                font=dict(size=10, color='gray'),
+                bgcolor='rgba(255,255,255,0.8)'
+            )
+        ]
+    )
+    
+    return fig
+
+def calculate_cumulative_cases_complete_weeks(df_dept, dept_name, weekly_target, latest_date):
+    """完全週データ対応の累積実績計算"""
+    try:
+        # 完全週データでフィルタリング
+        analysis_end_sunday = get_latest_complete_sunday(latest_date)
+        df_complete_weeks = df_dept[df_dept['手術実施日_dt'] <= analysis_end_sunday]
+        
+        # 週関連列を追加
+        df_with_weeks = add_week_columns(df_complete_weeks)
+        
+        # 全身麻酔手術のフィルタリング
+        gas_df = df_with_weeks[
+            df_with_weeks['麻酔種別'].str.contains("全身麻酔", na=False) &
+            df_with_weeks['麻酔種別'].str.contains("20分以上", na=False)
+        ]
+        
+        # 週ごとの集計
+        weekly_data = []
+        cumulative_actual = 0
+        
+        for week_start, week_data in gas_df.groupby('週開始日'):
+            # 平日のみの件数
+            weekday_data = week_data[week_data['平日フラグ']]
+            week_weekday_count = len(weekday_data)
+            
+            cumulative_actual += week_weekday_count
+            
+            # 週番号計算（年初からの週数）
+            year_start = pd.Timestamp(f'{week_start.year}-01-01')
+            week_number = ((week_start - year_start).days // 7) + 1
+            
+            cumulative_target = week_number * weekly_target if weekly_target > 0 else 0
+            achievement_rate = (cumulative_actual / cumulative_target * 100) if cumulative_target > 0 else 0
+            
+            weekly_data.append({
+                '週': f"{week_start.strftime('%m/%d')}～{(week_start + timedelta(days=6)).strftime('%m/%d')}",
+                '週開始日': week_start,
+                '週次実績': week_weekday_count,
+                '累積実績件数': cumulative_actual,
+                '累積目標件数': cumulative_target,
+                '達成率': achievement_rate
+            })
+        
+        return pd.DataFrame(weekly_data).sort_values('週開始日')
+        
+    except Exception as e:
+        print(f"完全週累積計算エラー: {e}")
+        return pd.DataFrame()
+
+def plot_cumulative_cases_complete_weeks(cumulative_data, dept_name):
+    """完全週データ対応の累積実績グラフ"""
+    import plotly.graph_objects as go
+    
+    fig = go.Figure()
+    
+    # 累積実績
+    fig.add_trace(go.Scatter(
+        x=cumulative_data['週'],
+        y=cumulative_data['累積実績件数'],
+        mode='lines+markers',
+        name='累積実績（完全週データ）',
+        line=dict(color='#2ca02c', width=3),
+        marker=dict(size=6)
+    ))
+    
+    # 累積目標
+    if '累積目標件数' in cumulative_data.columns and cumulative_data['累積目標件数'].sum() > 0:
+        fig.add_trace(go.Scatter(
+            x=cumulative_data['週'],
+            y=cumulative_data['累積目標件数'],
+            mode='lines',
+            name='累積目標',
+            line=dict(color='#ff7f0e', width=2, dash='dash')
+        ))
+    
+    fig.update_layout(
+        title=f"{dept_name} - 今年度累積実績 vs 目標（完全週データ）",
+        xaxis_title="週",
+        yaxis_title="累積件数",
+        height=500,
+        hovermode='x unified',
+        annotations=[
+            dict(
+                x=0.02,
+                y=0.98,
+                xref='paper',
+                yref='paper',
+                text='※完全週（月〜日）データのみ使用',
+                showarrow=False,
+                font=dict(size=10, color='gray'),
+                bgcolor='rgba(255,255,255,0.8)'
+            )
+        ]
+    )
+    
+    return fig
+
+def calculate_department_achievement_rates_complete_weeks(df, target_dict, latest_date):
+    """完全週データでの診療科別達成率計算"""
+    try:
+        # 完全週データでフィルタリング
+        analysis_end_sunday = get_latest_complete_sunday(latest_date)
+        df_complete = df[df['手術実施日_dt'] <= analysis_end_sunday]
+        
+        # 全身麻酔手術のフィルタリング
+        gas_df = df_complete[
+            df_complete['麻酔種別'].str.contains("全身麻酔", na=False) &
+            df_complete['麻酔種別'].str.contains("20分以上", na=False)
+        ]
+        
+        # 週関連列を追加
+        df_with_weeks = add_week_columns(gas_df)
+        
+        # 平日データのみを抽出
+        weekday_df = df_with_weeks[df_with_weeks['曜日番号'] < 5]
+        
+        # 診療科別週平均計算
+        achievement_data = []
+        
+        for dept in target_dict.keys():
+            dept_data = weekday_df[weekday_df['実施診療科'] == dept]
+            
+            if not dept_data.empty:
+                # 週数計算
+                total_weeks = dept_data['週開始日'].nunique()
+                total_cases = len(dept_data)
+                
+                # 週平均
+                weekly_avg = total_cases / total_weeks if total_weeks > 0 else 0
+                
+                # 目標達成率
+                target = target_dict.get(dept, 0)
+                achievement_rate = (weekly_avg / target * 100) if target > 0 else 0
+                
+                achievement_data.append({
+                    '診療科': dept,
+                    '週平均件数': weekly_avg,
+                    '目標件数': target,
+                    '達成率': achievement_rate,
+                    '分析週数': total_weeks
+                })
+        
+        if achievement_data:
+            result_df = pd.DataFrame(achievement_data)
+            result_df = result_df.sort_values('達成率', ascending=False)
+            return result_df
+        else:
+            return pd.DataFrame()
+            
+    except Exception as e:
+        print(f"完全週達成率計算エラー: {e}")
+        return pd.DataFrame()
+
+def plot_achievement_ranking_complete(achievement_rates, top_n=10):
+    """完全週データでの達成率ランキンググラフ"""
+    import plotly.express as px
+    
+    top_data = achievement_rates.head(top_n)
+    
+    fig = px.bar(
+        top_data,
+        x='達成率',
+        y='診療科',
+        orientation='h',
+        title=f"診療科別目標達成率ランキング (Top {top_n}) - 完全週データ",
+        text='達成率'
+    )
+    
+    fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+    fig.update_layout(
+        height=400,
+        xaxis_title="達成率 (%)",
+        yaxis_title="診療科",
+        yaxis={'categoryorder': 'total ascending'}
+    )
+    
+    # 100%ラインを追加
+    fig.add_vline(x=100, line_dash="dash", line_color="red", 
+                  annotation_text="目標100%")
+    
+    return fig
+    
 def analyze_weekly_summary_complete(df, target_dict=None, latest_date=None):
     """完全な週のデータのみを使用した週単位での病院全体サマリー分析"""
     if df.empty:

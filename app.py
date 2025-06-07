@@ -17,13 +17,20 @@ try:
         calculate_kpi_weekly_complete,
         get_latest_complete_sunday,
         get_data_cutoff_explanation,
-        format_week_period_info_complete
+        format_week_period_info_complete,
+        get_week_period_options,
+        plot_weekly_summary_graph_complete,
+        plot_weekly_department_graph_complete,
+        calculate_cumulative_cases_complete_weeks,
+        plot_cumulative_cases_complete_weeks,
+        calculate_department_achievement_rates_complete_weeks,
+        plot_achievement_ranking_complete
     )
     COMPLETE_WEEKS_LOADED = True
 except Exception as e:
     st.error(f"完全週データ分析モジュールの読み込みエラー: {e}")
     COMPLETE_WEEKS_LOADED = False
-    )
+
 # ページ設定
 st.set_page_config(
     page_title="🏥 手術分析ダッシュボード",
@@ -528,309 +535,6 @@ def create_comprehensive_surgeon_analysis(df_gas, target_dict):
         hide_index=True
     )
 
-ef analyze_department_weekly_summary_complete(df, department, target_dict=None, latest_date=None):
-    """特定診療科の週単位サマリー分析（完全週データ版）"""
-    if df.empty:
-        return pd.DataFrame()
-    
-    # 診療科でフィルタリング
-    dept_df = df[df['実施診療科'] == department].copy()
-    
-    if dept_df.empty:
-        return pd.DataFrame()
-    
-    # 完全な週のデータのみを使用
-    if latest_date:
-        analysis_end_sunday = get_latest_complete_sunday(latest_date)
-        dept_df = dept_df[dept_df['手術実施日_dt'] <= analysis_end_sunday]
-    
-    # 週関連列を追加
-    df_with_weeks = add_week_columns(dept_df)
-    
-    # 全身麻酔手術のフィルタリング
-    gas_df = df_with_weeks[
-        df_with_weeks['麻酔種別'].str.contains("全身麻酔", na=False) &
-        df_with_weeks['麻酔種別'].str.contains("20分以上", na=False)
-    ]
-    
-    # 週ごとの集計
-    weekly_summary = []
-    
-    for week_start, week_data in gas_df.groupby('週開始日'):
-        week_end = week_start + timedelta(days=6)
-        
-        # 平日のみの件数
-        weekday_data = week_data[week_data['平日フラグ']]
-        week_weekday = len(weekday_data)
-        
-        # 平日日数
-        weekday_count = len([d for d in pd.date_range(week_start, week_end) 
-                           if d.weekday() < 5])
-        
-        # 平日1日平均
-        daily_avg = week_weekday / weekday_count if weekday_count > 0 else 0
-        
-        weekly_summary.append({
-            '週開始日': week_start,
-            '週終了日': week_end,
-            '週ラベル': f"{week_start.strftime('%m/%d')}～{week_end.strftime('%m/%d')}",
-            'ISO週ラベル': week_data['ISO週ラベル'].iloc[0],
-            '診療科': department,
-            '週件数': week_weekday,
-            '平日日数': weekday_count,
-            '平日1日平均': round(daily_avg, 1)
-        })
-    
-    summary_df = pd.DataFrame(weekly_summary)
-    summary_df = summary_df.sort_values('週開始日')
-    
-    # 目標との比較
-    if target_dict and department in target_dict:
-        dept_target = target_dict[department]
-        summary_df['目標件数'] = dept_target
-        summary_df['達成率'] = (summary_df['週件数'] / dept_target * 100).round(1)
-        summary_df['目標差'] = summary_df['週件数'] - dept_target
-    
-    return summary_df
-    
-def plot_weekly_summary_graph_complete(summary_data, title, target_dict, show_incomplete_warning=True):
-    """週次サマリーグラフの描画（完全週データ版）"""
-    import plotly.graph_objects as go
-    
-    fig = go.Figure()
-    
-    # 実績線
-    fig.add_trace(go.Scatter(
-        x=summary_data['週ラベル'],
-        y=summary_data['平日件数'],
-        mode='lines+markers',
-        name='週次実績（完全週データ）',
-        line=dict(color='#1f77b4', width=3),
-        marker=dict(size=8),
-        hovertemplate='週: %{x}<br>件数: %{y}<br>完全週データ<extra></extra>'
-    ))
-    
-    # 目標線（全科の場合）
-    if '目標件数' in summary_data.columns:
-        fig.add_trace(go.Scatter(
-            x=summary_data['週ラベル'],
-            y=summary_data['目標件数'],
-            mode='lines',
-            name='週次目標',
-            line=dict(color='#ff7f0e', width=2, dash='dash'),
-            hovertemplate='目標: %{y}件<extra></extra>'
-        ))
-    
-    fig.update_layout(
-        title=f"{title} - 週次推移（完全週データ使用）",
-        xaxis_title="週",
-        yaxis_title="件数",
-        height=500,
-        hovermode='x unified',
-        annotations=[
-            dict(
-                x=0.02,
-                y=0.98,
-                xref='paper',
-                yref='paper',
-                text='※完全週（月〜日）データのみ使用',
-                showarrow=False,
-                font=dict(size=10, color='gray'),
-                bgcolor='rgba(255,255,255,0.8)'
-            )
-        ]
-    )
-    
-    return fig
-
-def plot_weekly_department_graph_complete(summary_data, department, target_dict, show_incomplete_warning=True):
-    """診療科別週次グラフの描画（完全週データ版）"""
-    import plotly.graph_objects as go
-    
-    fig = go.Figure()
-    
-    # 実績線
-    fig.add_trace(go.Scatter(
-        x=summary_data['週ラベル'],
-        y=summary_data['週件数'],
-        mode='lines+markers',
-        name=f'{department} 週次実績（完全週）',
-        line=dict(color='#2ca02c', width=3),
-        marker=dict(size=8),
-        hovertemplate='週: %{x}<br>件数: %{y}<br>完全週データ<extra></extra>'
-    ))
-    
-    # 目標線
-    if department in target_dict:
-        target_value = target_dict[department]
-        fig.add_hline(
-            y=target_value,
-            line_dash="dash",
-            line_color="#ff7f0e",
-            annotation_text=f"目標: {target_value}件/週"
-        )
-    
-    fig.update_layout(
-        title=f"{department} - 週次推移（完全週データ使用）",
-        xaxis_title="週",
-        yaxis_title="件数",
-        height=500,
-        hovermode='x unified',
-        annotations=[
-            dict(
-                x=0.02,
-                y=0.98,
-                xref='paper',
-                yref='paper',
-                text='※完全週（月〜日）データのみ使用',
-                showarrow=False,
-                font=dict(size=10, color='gray'),
-                bgcolor='rgba(255,255,255,0.8)'
-            )
-        ]
-    )
-    
-    return fig
-    
-def create_department_dashboard_weekly(df_gas, target_dict, latest_date):
-    """診療科ごとのパフォーマンスダッシュボード（完全週データ対応版）"""
-    
-    # 最新の完全な週の日曜日を取得
-    analysis_end_sunday = get_latest_complete_sunday(latest_date)
-    
-    # 直近4週のデータを取得（完全週のみ）
-    recent_4weeks_df = filter_data_by_complete_weeks(df_gas, "直近4週", latest_date)
-    
-    # 分析期間を表示
-    if not recent_4weeks_df.empty:
-        start_date = recent_4weeks_df['手術実施日_dt'].min()
-        end_date = recent_4weeks_df['手術実施日_dt'].max()
-        
-        # 週の境界に調整
-        period_start = get_week_start_monday(start_date)  # この関数は既存のものを使用
-        period_end = get_week_end_sunday(end_date)       # この関数は既存のものを使用
-        
-        st.subheader("📊 診療科別パフォーマンスダッシュボード（完全週データ分析）")
-        
-        # データカットオフの説明
-        cutoff_explanation = get_data_cutoff_explanation(latest_date, analysis_end_sunday)
-        st.caption(f"🗓️ 分析期間: {period_start.strftime('%Y/%m/%d')}〜{period_end.strftime('%Y/%m/%d')} (完全な4週間)")
-        st.caption(f"💡 {cutoff_explanation}")
-    
-    # ターゲット診療科
-    target_departments = [
-        "皮膚科", "整形外科", "産婦人科", "歯科口腔外科", "耳鼻咽喉科", 
-        "泌尿器科", "一般消化器外科", "呼吸器外科", "心臓血管外科", 
-        "乳腺外科", "形成外科", "脳神経外科"
-    ]
-    
-    # メトリクスの準備
-    metrics_data = []
-    
-    for dept in target_departments:
-        if dept in target_dict and dept in df_gas['実施診療科'].unique():
-            # 診療科の直近4週データ
-            dept_4weeks_df = recent_4weeks_df[
-                (recent_4weeks_df['実施診療科'] == dept) &
-                (recent_4weeks_df['麻酔種別'].str.contains("全身麻酔", na=False)) &
-                (recent_4weeks_df['麻酔種別'].str.contains("20分以上", na=False))
-            ]
-            
-            if not dept_4weeks_df.empty:
-                # 週次分析
-                weekly_summary = analyze_department_weekly_summary(dept_4weeks_df, dept, target_dict)
-                
-                if not weekly_summary.empty:
-                    # 4週平均
-                    avg_weekly_count = weekly_summary['週件数'].mean()
-                    
-                    # 目標値と達成率
-                    target = target_dict.get(dept, 0)
-                    achievement_rate = (avg_weekly_count / target * 100) if target > 0 else 0
-                    
-                    # 直近週の実績
-                    latest_week_count = weekly_summary['週件数'].iloc[-1] if len(weekly_summary) > 0 else 0
-                    
-                    metrics_data.append({
-                        "診療科": dept,
-                        "4週平均": avg_weekly_count,
-                        "直近週実績": latest_week_count,
-                        "週間目標": target,
-                        "達成率": achievement_rate,
-                        "状態": "達成" if achievement_rate >= 100 else 
-                               "注意" if achievement_rate >= 80 else "未達成"
-                    })
-    
-    if not metrics_data:
-        st.warning("表示可能な診療科データがありません。")
-        return
-    
-    # データフレーム作成と降順ソート
-    metrics_df = pd.DataFrame(metrics_data)
-    metrics_df = metrics_df.sort_values("達成率", ascending=False)
-    
-    # ダッシュボード表示（3列レイアウト）
-    cols = st.columns(3)
-    
-    for i, (_, row) in enumerate(metrics_df.iterrows()):
-        col_index = i % 3
-        with cols[col_index]:
-            # メトリクスカードの背景色を達成状況に応じて設定
-            if row["状態"] == "達成":
-                card_color = "rgba(76, 175, 80, 0.1)"
-                text_color = "#4CAF50"
-                border_color = "#4CAF50"
-            elif row["状態"] == "注意":
-                card_color = "rgba(255, 152, 0, 0.1)"
-                text_color = "#FF9800"
-                border_color = "#FF9800"
-            else:
-                card_color = "rgba(244, 67, 54, 0.1)"
-                text_color = "#F44336"
-                border_color = "#F44336"
-            
-            # カスタムHTMLを使用してメトリクスカードを作成
-            html = f"""
-            <div style="background-color: {card_color}; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; border-left: 4px solid {border_color};">
-                <h4 style="margin-top: 0; color: {text_color}; font-size: 1.1rem;">{row["診療科"]}</h4>
-                <div style="margin-bottom: 0.5rem;">
-                    <span style="font-size: 0.9rem; color: #666;">4週平均:</span>
-                    <span style="font-weight: bold; font-size: 1.1rem; color: #333;">{row["4週平均"]:.1f} 件/週</span>
-                </div>
-                <div style="margin-bottom: 0.5rem;">
-                    <span style="font-size: 0.9rem; color: #666;">直近週:</span>
-                    <span style="font-size: 1rem; color: #333;">{row["直近週実績"]:.0f} 件</span>
-                </div>
-                <div style="margin-bottom: 0.5rem;">
-                    <span style="font-size: 0.9rem; color: #666;">目標:</span>
-                    <span style="font-size: 1rem; color: #333;">{row["週間目標"]} 件/週</span>
-                </div>
-                <div style="margin-bottom: 0.5rem;">
-                    <span style="font-size: 0.9rem; color: #666;">達成率:</span>
-                    <span style="font-weight: bold; color: {text_color}; font-size: 1.1rem;">{row["達成率"]:.1f}%</span>
-                </div>
-                <div style="background-color: #e0e0e0; height: 6px; border-radius: 3px; margin-top: 0.5rem;">
-                    <div style="background-color: {border_color}; width: {min(row["達成率"], 100)}%; height: 100%; border-radius: 3px;"></div>
-                </div>
-            </div>
-            """
-            st.markdown(html, unsafe_allow_html=True)
-    
-    # 詳細テーブルを折りたたみセクションで表示
-    with st.expander("詳細データテーブル（週単位）", expanded=False):
-        st.dataframe(
-            metrics_df.style
-                .format({"4週平均": "{:.1f}", "達成率": "{:.1f}%", "直近週実績": "{:.0f}"})
-                .apply(lambda x: [
-                    f"background-color: rgba(76, 175, 80, 0.2)" if x["達成率"] >= 100 else
-                    f"background-color: rgba(255, 152, 0, 0.2)" if x["達成率"] >= 80 else
-                    f"background-color: rgba(244, 67, 54, 0.2)"
-                    for _ in range(len(x))
-                ], axis=1),
-            hide_index=True,
-            use_container_width=True
-        )
-
 def create_kpi_card(title, value, change=None, change_label="前期比"):
     """KPIカードを作成"""
     # 変化の色を決定
@@ -856,6 +560,254 @@ def create_kpi_card(title, value, change=None, change_label="前期比"):
         <div class="kpi-change {change_class}">{change_text}</div>
     </div>
     """
+
+def render_main_dashboard():
+    """メインダッシュボード - 統合版（完全週データ機能の有無で分岐）"""
+    if not MODULES_LOADED:
+        st.error("必要なモジュールが読み込まれていません。")
+        return
+    
+    # 完全週データ機能が利用可能な場合
+    if COMPLETE_WEEKS_LOADED:
+        render_main_dashboard_complete_weeks()
+    else:
+        # 従来版にフォールバック
+        render_main_dashboard_legacy()
+
+def render_main_dashboard_legacy():
+    """メインダッシュボード（従来版）"""
+    # ヘッダー
+    st.markdown("""
+    <div class="main-header">
+        <h1 class="dashboard-title">🏥 手術分析ダッシュボード</h1>
+        <p class="dashboard-subtitle">全身麻酔手術件数の包括的分析と予測</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # データが読み込まれているかチェック
+    if st.session_state.get('df_gas') is None or st.session_state['df_gas'].empty:
+        st.warning("📊 データをアップロードしてください")
+        st.info("サイドバーの「データアップロード」からCSVファイルを読み込んでください。")
+        return
+    
+    df_gas = st.session_state['df_gas']
+    target_dict = st.session_state.get('target_dict', {})
+    latest_date = st.session_state.get('latest_date')
+    
+    # フィルタセクション
+    with st.container():
+        st.markdown('<div class="filter-section">', unsafe_allow_html=True)
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            period_filter = st.selectbox("📅 分析期間", 
+                                       ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
+                                       index=1)
+        
+        with col2:
+            departments = ["全診療科"] + sorted(df_gas["実施診療科"].dropna().unique().tolist())
+            dept_filter = st.selectbox("🏥 診療科", departments)
+        
+        with col3:
+            view_type = st.selectbox("📊 表示形式", 
+                                   ["週次", "月次", "四半期"],
+                                   index=0)
+        
+        with col4:
+            auto_refresh = st.checkbox("🔄 自動更新", value=False)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # データフィルタリング
+    filtered_df = filter_data_by_period(df_gas, period_filter)
+    if dept_filter != "全診療科":
+        filtered_df = filtered_df[filtered_df["実施診療科"] == dept_filter]
+    
+    # KPI計算
+    # 1. 総手術件数
+    total_cases = len(filtered_df)
+    
+    # 2. 全身麻酔手術件数
+    gas_cases = len(filtered_df[
+        filtered_df['麻酔種別'].str.contains("全身麻酔", na=False) &
+        filtered_df['麻酔種別'].str.contains("20分以上", na=False)
+    ])
+    
+    # 3. 平日データを抽出
+    weekday_df = filtered_df[filtered_df['手術実施日_dt'].dt.dayofweek < 5]
+    gas_weekday_df = weekday_df[
+        weekday_df['麻酔種別'].str.contains("全身麻酔", na=False) &
+        weekday_df['麻酔種別'].str.contains("20分以上", na=False)
+    ]
+    
+    # 平日1日平均全身麻酔手術件数
+    weekday_count = weekday_df['手術実施日_dt'].nunique()
+    daily_avg_gas = len(gas_weekday_df) / weekday_count if weekday_count > 0 else 0
+    
+    # 4. 稼働率計算
+    utilization_rate = calculate_operating_room_utilization(filtered_df, latest_date)
+    
+    # 前期比較計算（簡易版）
+    prev_total = total_cases * 0.95  # 仮の前期データ
+    change_rate = ((total_cases - prev_total) / prev_total * 100) if prev_total > 0 else 0
+    
+    # KPIカード表示（修正版）
+    st.markdown("### 📊 主要指標")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(create_kpi_card(
+            f"総手術件数 ({period_filter})",
+            f"{total_cases:,}",
+            change_rate
+        ), unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(create_kpi_card(
+            "全身麻酔手術件数",
+            f"{gas_cases:,}",
+            change_rate * 0.9
+        ), unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(create_kpi_card(
+            "平日1日平均全身麻酔",
+            f"{daily_avg_gas:.1f}",
+            change_rate * 0.8
+        ), unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown(create_kpi_card(
+            "稼働率",
+            f"{utilization_rate:.1f}%",
+            2.3
+        ), unsafe_allow_html=True)
+    
+    # メインチャートエリア
+    st.markdown("### 📈 トレンド分析")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        with st.container():
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            
+            # トレンドグラフ
+            if view_type == "週次":
+                if dept_filter == "全診療科":
+                    summary_data = analyze_hospital_summary(filtered_df)
+                    if not summary_data.empty:
+                        fig = plot_summary_graph(summary_data, "全科", target_dict, 4)
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    summary_data = analyze_department_summary(filtered_df, dept_filter)
+                    if not summary_data.empty:
+                        fig = plot_department_graph(summary_data, dept_filter, target_dict, 4)
+                        st.plotly_chart(fig, use_container_width=True)
+            elif view_type == "月次":
+                summary_data = analyze_monthly_summary(filtered_df)
+                if not summary_data.empty:
+                    # 月次グラフの作成（簡易版）
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=summary_data['月'],
+                        y=summary_data['平日1日平均件数'],
+                        mode='lines+markers',
+                        name='月次推移'
+                    ))
+                    fig.update_layout(title="月次推移", xaxis_title="月", yaxis_title="平日1日平均件数")
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        with st.container():
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.markdown("#### 🎯 診療科別実績")
+            
+            # 診療科別実績表示
+            if dept_filter == "全診療科":
+                # トップ診療科の表示
+                dept_summary = filtered_df.groupby('実施診療科').size().sort_values(ascending=False).head(10)
+                
+                # 棒グラフ
+                fig = px.bar(
+                    x=dept_summary.values,
+                    y=dept_summary.index,
+                    orientation='h',
+                    title="診療科別件数 (Top 10)"
+                )
+                fig.update_layout(height=400, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                # 選択された診療科の詳細
+                dept_data = filtered_df[filtered_df["実施診療科"] == dept_filter]
+                dept_cases = len(dept_data[
+                    dept_data['麻酔種別'].str.contains("全身麻酔", na=False) &
+                    dept_data['麻酔種別'].str.contains("20分以上", na=False)
+                ])
+                
+                st.metric("選択診療科件数", dept_cases)
+                
+                # 週間分布
+                if not dept_data.empty:
+                    dept_data_copy = dept_data.copy()
+                    dept_data_copy['曜日'] = dept_data_copy['手術実施日_dt'].dt.day_name()
+                    weekday_dist = dept_data_copy.groupby('曜日').size()
+                    
+                    fig = px.pie(
+                        values=weekday_dist.values,
+                        names=weekday_dist.index,
+                        title="曜日別分布"
+                    )
+                    fig.update_layout(height=300)
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 詳細分析セクション
+    st.markdown("### 📋 詳細分析")
+    
+    tab1, tab2, tab3 = st.tabs(["📊 統計情報", "🏆 ランキング", "📈 予測"])
+    
+    with tab1:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 統計テーブル
+            if view_type == "週次":
+                recent_stats = calculate_recent_averages(filtered_df)
+                if not recent_stats.empty:
+                    st.dataframe(recent_stats, use_container_width=True)
+        
+        with col2:
+            # 期間分析
+            if not filtered_df.empty:
+                st.write("📅 データ期間")
+                st.write(f"開始日: {filtered_df['手術実施日_dt'].min().strftime('%Y/%m/%d')}")
+                st.write(f"終了日: {filtered_df['手術実施日_dt'].max().strftime('%Y/%m/%d')}")
+                st.write(f"総日数: {(filtered_df['手術実施日_dt'].max() - filtered_df['手術実施日_dt'].min()).days + 1}日")
+    
+    with tab2:
+        # ランキング表示
+        if target_dict and dept_filter == "全診療科":
+            achievement_rates, achievement_summary = calculate_department_achievement_rates(filtered_df, target_dict)
+            if not achievement_rates.empty:
+                fig_rank = plot_achievement_ranking(achievement_rates, 10)
+                st.plotly_chart(fig_rank, use_container_width=True)
+                
+                st.dataframe(achievement_rates.head(10), use_container_width=True)
+        else:
+            st.info("目標データがセットされている場合に診療科別ランキングが表示されます。")
+    
+    with tab3:
+        # 簡易予測表示
+        st.info("詳細な予測分析は「将来予測」セクションをご利用ください。")
+        
+        # 簡易トレンド分析
+        if not filtered_df.empty:
+            recent_trend = filtered_df.groupby(filtered_df['手術実施日_dt'].dt.date).size().tail(7).mean()
+            st.metric("直近7日平均", f"{recent_trend:.1f} 件/日")
 
 def render_main_dashboard_complete_weeks():
     """メインダッシュボード（完全週データ対応版）"""
@@ -1273,8 +1225,21 @@ def render_upload_section():
             st.error(f"❌ データ統合エラー: {e}")
 
 def render_hospital_analysis():
-    """病院全体分析画面（週単位対応版）"""
-    st.header("🏥 病院全体分析（週単位）")
+    """病院全体分析画面 - 統合版（完全週データ機能の有無で分岐）"""
+    if not MODULES_LOADED:
+        st.error("必要なモジュールが読み込まれていません。")
+        return
+    
+    # 完全週データ機能が利用可能な場合
+    if COMPLETE_WEEKS_LOADED:
+        render_hospital_analysis_complete_weeks()
+    else:
+        # 従来版にフォールバック
+        render_hospital_analysis_legacy()
+
+def render_hospital_analysis_legacy():
+    """病院全体分析画面（従来版）"""
+    st.header("🏥 病院全体分析")
     
     if st.session_state.get('df_gas') is None or st.session_state['df_gas'].empty:
         st.warning("データをアップロードしてください。")
@@ -1284,19 +1249,169 @@ def render_hospital_analysis():
     target_dict = st.session_state.get('target_dict', {})
     latest_date = st.session_state.get('latest_date')
     
-    # データ概要表示
+    st.info(f"分析対象期間: {df_gas['手術実施日_dt'].min().strftime('%Y/%m/%d')} ～ {latest_date.strftime('%Y/%m/%d')}")
+    
+    # 診療科別パフォーマンスダッシュボードを追加
+    create_department_dashboard(df_gas, target_dict, latest_date)
+    
+    st.markdown("---")
+    
+    # 分析設定
     col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        analysis_type = st.radio("📊 分析対象", ["全身麻酔手術", "全手術"], horizontal=True, key="hospital_analysis_type")
+    
+    with col2:
+        period_filter = st.selectbox("📅 分析期間", 
+                                   ["直近30日", "直近90日", "直近180日", "今年度", "全期間"],
+                                   index=1, key="hospital_period_filter")
+    
+    with col3:
+        view_type = st.selectbox("📊 表示形式", 
+                               ["週次", "月次", "四半期"],
+                               index=0, key="hospital_view_type")
+    
+    # データフィルタリング
+    filtered_df = filter_data_by_period(df_gas, period_filter)
+    
+    # 分析対象に応じてデータを絞り込み
+    if analysis_type == "全身麻酔手術":
+        analysis_df = filtered_df[
+            filtered_df['麻酔種別'].str.contains("全身麻酔", na=False) &
+            filtered_df['麻酔種別'].str.contains("20分以上", na=False)
+        ]
+    else:
+        analysis_df = filtered_df
+    
+    # 週次分析
+    if view_type == "週次":
+        st.subheader(f"📈 {analysis_type} - 週次推移")
+        
+        summary_data = analyze_hospital_summary(analysis_df)
+        if not summary_data.empty:
+            fig = plot_summary_graph(summary_data, f"全科({analysis_type})", target_dict, 4)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # 統計情報
+            with st.expander("週次統計詳細"):
+                st.dataframe(summary_data, use_container_width=True)
+        else:
+            st.warning("表示可能なデータがありません。")
+    
+    # 月次分析
+    elif view_type == "月次":
+        st.subheader(f"📅 {analysis_type} - 月次推移")
+        
+        monthly_data = analyze_monthly_summary(analysis_df)
+        if not monthly_data.empty:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=monthly_data['月'],
+                y=monthly_data['平日1日平均件数'],
+                mode='lines+markers',
+                name=f'{analysis_type} 月次推移',
+                line=dict(width=3)
+            ))
+            fig.update_layout(
+                title=f"{analysis_type} 月次推移",
+                xaxis_title="月",
+                yaxis_title="平日1日平均件数",
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            with st.expander("月次統計詳細"):
+                st.dataframe(monthly_data, use_container_width=True)
+    
+    # 四半期分析
+    elif view_type == "四半期":
+        st.subheader(f"🗓️ {analysis_type} - 四半期推移")
+        
+        from monthly_quarterly_analyzer import analyze_quarterly_summary
+        quarterly_data = analyze_quarterly_summary(analysis_df)
+        if not quarterly_data.empty:
+            fig = px.bar(
+                quarterly_data,
+                x='四半期ラベル',
+                y='平日1日平均件数',
+                title=f"{analysis_type} 四半期推移"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            with st.expander("四半期統計詳細"):
+                st.dataframe(quarterly_data, use_container_width=True)
+    
+    # 診療科別分析
+    st.markdown("---")
+    st.subheader(f"🏛️ 診療科別 {analysis_type} 内訳")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # 診療科別件数
+        dept_counts = analysis_df.groupby('実施診療科').size().sort_values(ascending=False).head(10)
+        
+        fig_dept = px.bar(
+            x=dept_counts.values,
+            y=dept_counts.index,
+            orientation='h',
+            title=f"診療科別{analysis_type}件数 (Top 10)"
+        )
+        fig_dept.update_layout(height=400)
+        st.plotly_chart(fig_dept, use_container_width=True)
+    
+    with col2:
+        # 時間分析
+        if not analysis_df.empty:
+            analysis_df_copy = analysis_df.copy()
+            analysis_df_copy['曜日'] = analysis_df_copy['手術実施日_dt'].dt.day_name()
+            weekday_dist = analysis_df_copy.groupby('曜日').size()
+            
+            fig_week = px.pie(
+                values=weekday_dist.values,
+                names=weekday_dist.index,
+                title=f"曜日別{analysis_type}分布"
+            )
+            fig_week.update_layout(height=400)
+            st.plotly_chart(fig_week, use_container_width=True)
+            
+def render_hospital_analysis_complete_weeks():
+    """病院全体分析画面（完全週データ対応版）"""
+    st.header("🏥 病院全体分析（完全週データ）")
+    
+    if st.session_state.get('df_gas') is None or st.session_state['df_gas'].empty:
+        st.warning("データをアップロードしてください。")
+        return
+    
+    df_gas = st.session_state['df_gas']
+    target_dict = st.session_state.get('target_dict', {})
+    latest_date = st.session_state.get('latest_date')
+    
+    # データ状況を明確に表示
+    analysis_end_sunday = get_latest_complete_sunday(latest_date)
+    cutoff_explanation = get_data_cutoff_explanation(latest_date, analysis_end_sunday)
+    
+    # データ概要表示
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("📊 総レコード数", f"{len(df_gas):,}件")
     with col2:
-        st.metric("📅 データ期間", 
-                 f"{df_gas['手術実施日_dt'].min().strftime('%Y/%m/%d')} ～ {latest_date.strftime('%Y/%m/%d')}")
+        st.metric("📅 最新データ日", latest_date.strftime('%Y/%m/%d'))
     with col3:
-        st.metric("🏥 診療科数", df_gas['実施診療科'].nunique())
+        st.metric("🎯 分析終了日", analysis_end_sunday.strftime('%Y/%m/%d'))
+    with col4:
+        excluded_days = (latest_date - analysis_end_sunday).days
+        st.metric("⚠️ 除外日数", f"{excluded_days}日")
     
-    # 診療科別パフォーマンスダッシュボード（週単位）
+    if excluded_days > 0:
+        st.info(f"💡 **分析精度向上**: {cutoff_explanation}")
+    else:
+        st.success(f"✅ **最新週まで分析可能**: {cutoff_explanation}")
+    
+    # 診療科別パフォーマンスダッシュボード（完全週データ対応）
     st.markdown("---")
-    create_department_dashboard_weekly(df_gas, target_dict, latest_date)
+    create_department_dashboard_weekly_complete(df_gas, target_dict, latest_date)
     
     st.markdown("---")
     
@@ -1316,8 +1431,8 @@ def render_hospital_analysis():
                                ["週次", "月次", "四半期"],
                                index=0, key="hospital_view_type")
     
-    # データフィルタリング（週単位）
-    filtered_df = filter_data_by_week_period(df_gas, period_filter, latest_date)
+    # データフィルタリング（完全週データ）
+    filtered_df = filter_data_by_complete_weeks(df_gas, period_filter, latest_date)
     
     # 分析対象に応じてデータを絞り込み
     if analysis_type == "全身麻酔手術":
@@ -1334,24 +1449,165 @@ def render_hospital_analysis():
         end_date = analysis_df['手術実施日_dt'].max()
         total_weeks = int((end_date - start_date).days / 7) + 1
         
-        st.info(format_week_period_info(period_filter, start_date, end_date, total_weeks))
+        period_info = format_week_period_info_complete(period_filter, start_date, end_date, total_weeks, latest_date)
+        st.info(period_info)
     
     # 週次分析
     if view_type == "週次":
-        st.subheader(f"📈 {analysis_type} - 週次推移")
+        st.subheader(f"📈 {analysis_type} - 週次推移（完全週データ）")
         
-        summary_data = analyze_weekly_summary(analysis_df, target_dict)
+        summary_data = analyze_weekly_summary_complete(analysis_df, target_dict, latest_date)
         if not summary_data.empty:
-            fig = plot_weekly_summary_graph(summary_data, f"全科({analysis_type})", target_dict)
+            fig = plot_weekly_summary_graph_complete(summary_data, f"全科({analysis_type})", target_dict)
             st.plotly_chart(fig, use_container_width=True)
             
             # 統計情報
-            with st.expander("週次統計詳細"):
+            with st.expander("週次統計詳細（完全週データ）"):
                 st.dataframe(summary_data, use_container_width=True)
         else:
-            st.warning("表示可能なデータがありません。")
+            st.warning("表示可能な完全週データがありません。")
 
-def render_department_analysis():
+def create_department_dashboard_weekly_complete(df_gas, target_dict, latest_date):
+    """診療科パフォーマンスダッシュボード（完全週データ対応版）"""
+    
+    # 最新の完全な週の日曜日を取得
+    analysis_end_sunday = get_latest_complete_sunday(latest_date)
+    
+    # 直近4週のデータを取得（完全週のみ）
+    recent_4weeks_df = filter_data_by_complete_weeks(df_gas, "直近4週", latest_date)
+    
+    # 分析期間を表示
+    if not recent_4weeks_df.empty:
+        start_date = recent_4weeks_df['手術実施日_dt'].min()
+        end_date = recent_4weeks_df['手術実施日_dt'].max()
+        
+        # 週の境界に調整
+        from complete_weeks_analyzer import get_week_start_monday, get_week_end_sunday
+        period_start = get_week_start_monday(start_date)
+        period_end = get_week_end_sunday(end_date)
+        
+        st.subheader("📊 診療科別パフォーマンスダッシュボード（完全週データ分析）")
+        
+        # データカットオフの説明
+        cutoff_explanation = get_data_cutoff_explanation(latest_date, analysis_end_sunday)
+        st.caption(f"🗓️ 分析期間: {period_start.strftime('%Y/%m/%d')}〜{period_end.strftime('%Y/%m/%d')} (完全な4週間)")
+        st.caption(f"💡 {cutoff_explanation}")
+    
+    # ターゲット診療科
+    target_departments = [
+        "皮膚科", "整形外科", "産婦人科", "歯科口腔外科", "耳鼻咽喉科", 
+        "泌尿器科", "一般消化器外科", "呼吸器外科", "心臓血管外科", 
+        "乳腺外科", "形成外科", "脳神経外科"
+    ]
+    
+    # メトリクスの準備
+    metrics_data = []
+    
+    for dept in target_departments:
+        if dept in target_dict and dept in df_gas['実施診療科'].unique():
+            # 診療科の直近4週データ
+            dept_4weeks_df = recent_4weeks_df[
+                (recent_4weeks_df['実施診療科'] == dept) &
+                (recent_4weeks_df['麻酔種別'].str.contains("全身麻酔", na=False)) &
+                (recent_4weeks_df['麻酔種別'].str.contains("20分以上", na=False))
+            ]
+            
+            if not dept_4weeks_df.empty:
+                # 週次分析
+                weekly_summary = analyze_department_weekly_summary_complete(dept_4weeks_df, dept, target_dict, latest_date)
+                
+                if not weekly_summary.empty:
+                    # 4週平均
+                    avg_weekly_count = weekly_summary['週件数'].mean()
+                    
+                    # 目標値と達成率
+                    target = target_dict.get(dept, 0)
+                    achievement_rate = (avg_weekly_count / target * 100) if target > 0 else 0
+                    
+                    # 直近週の実績
+                    latest_week_count = weekly_summary['週件数'].iloc[-1] if len(weekly_summary) > 0 else 0
+                    
+                    metrics_data.append({
+                        "診療科": dept,
+                        "4週平均": avg_weekly_count,
+                        "直近週実績": latest_week_count,
+                        "週間目標": target,
+                        "達成率": achievement_rate,
+                        "状態": "達成" if achievement_rate >= 100 else 
+                               "注意" if achievement_rate >= 80 else "未達成"
+                    })
+    
+    if not metrics_data:
+        st.warning("表示可能な診療科データがありません。")
+        return
+    
+    # データフレーム作成と降順ソート
+    metrics_df = pd.DataFrame(metrics_data)
+    metrics_df = metrics_df.sort_values("達成率", ascending=False)
+    
+    # ダッシュボード表示（3列レイアウト）
+    cols = st.columns(3)
+    
+    for i, (_, row) in enumerate(metrics_df.iterrows()):
+        col_index = i % 3
+        with cols[col_index]:
+            # メトリクスカードの背景色を達成状況に応じて設定
+            if row["状態"] == "達成":
+                card_color = "rgba(76, 175, 80, 0.1)"
+                text_color = "#4CAF50"
+                border_color = "#4CAF50"
+            elif row["状態"] == "注意":
+                card_color = "rgba(255, 152, 0, 0.1)"
+                text_color = "#FF9800"
+                border_color = "#FF9800"
+            else:
+                card_color = "rgba(244, 67, 54, 0.1)"
+                text_color = "#F44336"
+                border_color = "#F44336"
+            
+            # カスタムHTMLを使用してメトリクスカードを作成
+            html = f"""
+            <div style="background-color: {card_color}; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; border-left: 4px solid {border_color};">
+                <h4 style="margin-top: 0; color: {text_color}; font-size: 1.1rem;">{row["診療科"]}</h4>
+                <div style="margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.9rem; color: #666;">4週平均:</span>
+                    <span style="font-weight: bold; font-size: 1.1rem; color: #333;">{row["4週平均"]:.1f} 件/週</span>
+                </div>
+                <div style="margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.9rem; color: #666;">直近週:</span>
+                    <span style="font-size: 1rem; color: #333;">{row["直近週実績"]:.0f} 件</span>
+                </div>
+                <div style="margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.9rem; color: #666;">目標:</span>
+                    <span style="font-size: 1rem; color: #333;">{row["週間目標"]} 件/週</span>
+                </div>
+                <div style="margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.9rem; color: #666;">達成率:</span>
+                    <span style="font-weight: bold; color: {text_color}; font-size: 1.1rem;">{row["達成率"]:.1f}%</span>
+                </div>
+                <div style="background-color: #e0e0e0; height: 6px; border-radius: 3px; margin-top: 0.5rem;">
+                    <div style="background-color: {border_color}; width: {min(row["達成率"], 100)}%; height: 100%; border-radius: 3px;"></div>
+                </div>
+            </div>
+            """
+            st.markdown(html, unsafe_allow_html=True)
+    
+    # 詳細テーブルを折りたたみセクションで表示
+    with st.expander("詳細データテーブル（完全週データ）", expanded=False):
+        st.dataframe(
+            metrics_df.style
+                .format({"4週平均": "{:.1f}", "達成率": "{:.1f}%", "直近週実績": "{:.0f}"})
+                .apply(lambda x: [
+                    f"background-color: rgba(76, 175, 80, 0.2)" if x["達成率"] >= 100 else
+                    f"background-color: rgba(255, 152, 0, 0.2)" if x["達成率"] >= 80 else
+                    f"background-color: rgba(244, 67, 54, 0.2)"
+                    for _ in range(len(x))
+                ], axis=1),
+            hide_index=True,
+            use_container_width=True
+        )
+
+def render_department_analysis_complete_weeks():
     """診療科別分析画面（完全週データ対応版）"""
     st.header("🩺 診療科別分析（完全週データ）")
     
@@ -1791,103 +2047,270 @@ def render_department_analysis():
             else:
                 st.info(f"今年度に {selected_dept} のデータがありません。")
 
-# 完全週データ対応の累積分析関数（新規追加が必要）
-def calculate_cumulative_cases_complete_weeks(df_dept, dept_name, weekly_target, latest_date):
-    """完全週データ対応の累積実績計算"""
-    try:
-        # 完全週データでフィルタリング
-        analysis_end_sunday = get_latest_complete_sunday(latest_date)
-        df_complete_weeks = df_dept[df_dept['手術実施日_dt'] <= analysis_end_sunday]
-        
-        # 週関連列を追加
-        df_with_weeks = add_week_columns(df_complete_weeks)
-        
-        # 全身麻酔手術のフィルタリング
-        gas_df = df_with_weeks[
-            df_with_weeks['麻酔種別'].str.contains("全身麻酔", na=False) &
-            df_with_weeks['麻酔種別'].str.contains("20分以上", na=False)
-        ]
-        
-        # 週ごとの集計
-        weekly_data = []
-        cumulative_actual = 0
-        
-        for week_start, week_data in gas_df.groupby('週開始日'):
-            # 平日のみの件数
-            weekday_data = week_data[week_data['平日フラグ']]
-            week_weekday_count = len(weekday_data)
-            
-            cumulative_actual += week_weekday_count
-            
-            # 週番号計算（年初からの週数）
-            year_start = pd.Timestamp(f'{week_start.year}-01-01')
-            week_number = ((week_start - year_start).days // 7) + 1
-            
-            cumulative_target = week_number * weekly_target if weekly_target > 0 else 0
-            achievement_rate = (cumulative_actual / cumulative_target * 100) if cumulative_target > 0 else 0
-            
-            weekly_data.append({
-                '週': f"{week_start.strftime('%m/%d')}～{(week_start + timedelta(days=6)).strftime('%m/%d')}",
-                '週開始日': week_start,
-                '週次実績': week_weekday_count,
-                '累積実績件数': cumulative_actual,
-                '累積目標件数': cumulative_target,
-                '達成率': achievement_rate
-            })
-        
-        return pd.DataFrame(weekly_data).sort_values('週開始日')
-        
-    except Exception as e:
-        print(f"完全週累積計算エラー: {e}")
-        return pd.DataFrame()
+def render_department_analysis():
+    """診療科別分析画面 - 統合版（完全週データ機能の有無で分岐）"""
+    if not MODULES_LOADED:
+        st.error("必要なモジュールが読み込まれていません。")
+        return
+    
+    # 完全週データ機能が利用可能な場合
+    if COMPLETE_WEEKS_LOADED:
+        render_department_analysis_complete_weeks()
+    else:
+        # 従来版にフォールバック
+        render_department_analysis_legacy()
 
-def plot_cumulative_cases_complete_weeks(cumulative_data, dept_name):
-    """完全週データ対応の累積実績グラフ"""
-    import plotly.graph_objects as go
+def render_department_analysis_legacy():
+    """診療科別分析画面（従来版）"""
+    st.header("🩺 診療科別分析")
     
-    fig = go.Figure()
+    if st.session_state.get('df_gas') is None or st.session_state['df_gas'].empty:
+        st.warning("データをアップロードしてください。")
+        return
     
-    # 累積実績
-    fig.add_trace(go.Scatter(
-        x=cumulative_data['週'],
-        y=cumulative_data['累積実績件数'],
-        mode='lines+markers',
-        name='累積実績（完全週データ）',
-        line=dict(color='#2ca02c', width=3),
-        marker=dict(size=6)
-    ))
+    df_gas = st.session_state['df_gas']
+    target_dict = st.session_state.get('target_dict', {})
+    latest_date = st.session_state.get('latest_date')
     
-    # 累積目標
-    if '累積目標件数' in cumulative_data.columns and cumulative_data['累積目標件数'].sum() > 0:
-        fig.add_trace(go.Scatter(
-            x=cumulative_data['週'],
-            y=cumulative_data['累積目標件数'],
-            mode='lines',
-            name='累積目標',
-            line=dict(color='#ff7f0e', width=2, dash='dash')
-        ))
+    # 診療科選択
+    departments = sorted(df_gas["実施診療科"].dropna().unique().tolist())
+    selected_dept = st.selectbox("🏥 診療科選択", departments, key="dept_analysis_select")
     
-    fig.update_layout(
-        title=f"{dept_name} - 今年度累積実績 vs 目標（完全週データ）",
-        xaxis_title="週",
-        yaxis_title="累積件数",
-        height=500,
-        hovermode='x unified',
-        annotations=[
-            dict(
-                x=0.02,
-                y=0.98,
-                xref='paper',
-                yref='paper',
-                text='※完全週（月〜日）データのみ使用',
-                showarrow=False,
-                font=dict(size=10, color='gray'),
-                bgcolor='rgba(255,255,255,0.8)'
+    # データフィルタリング
+    dept_data = df_gas[df_gas["実施診療科"] == selected_dept]
+    
+    if dept_data.empty:
+        st.warning(f"選択された診療科「{selected_dept}」のデータが見つかりません。")
+        return
+    
+    # KPI計算（従来版）
+    # 1. 総手術件数
+    total_cases = len(dept_data)
+    
+    # 2. 全身麻酔手術件数
+    gas_cases = len(dept_data[
+        dept_data['麻酔種別'].str.contains("全身麻酔", na=False) &
+        dept_data['麻酔種別'].str.contains("20分以上", na=False)
+    ])
+    
+    # 3. 平日データを抽出
+    weekday_dept_data = dept_data[dept_data['手術実施日_dt'].dt.dayofweek < 5]
+    gas_weekday_data = weekday_dept_data[
+        weekday_dept_data['麻酔種別'].str.contains("全身麻酔", na=False) &
+        weekday_dept_data['麻酔種別'].str.contains("20分以上", na=False)
+    ]
+    
+    # 平日1日平均全身麻酔手術件数
+    weekday_count = weekday_dept_data['手術実施日_dt'].nunique()
+    daily_avg_gas = len(gas_weekday_data) / weekday_count if weekday_count > 0 else 0
+    
+    # 4. 目標達成率計算
+    # 週次全身麻酔手術件数を計算
+    weeks_count = (dept_data['手術実施日_dt'].max() - dept_data['手術実施日_dt'].min()).days / 7
+    weekly_avg_gas = gas_cases / weeks_count if weeks_count > 0 else 0
+    
+    target_value = target_dict.get(selected_dept, 0) if target_dict else 0
+    achievement_rate = (weekly_avg_gas / target_value * 100) if target_value > 0 else 0
+    
+    # KPIカード表示
+    st.markdown(f"### 📊 {selected_dept} の主要指標")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown(create_kpi_card(
+            "総手術件数",
+            f"{total_cases:,}",
+            2.5
+        ), unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(create_kpi_card(
+            "全身麻酔手術件数",
+            f"{gas_cases:,}",
+            1.8
+        ), unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(create_kpi_card(
+            "平日1日平均全身麻酔",
+            f"{daily_avg_gas:.1f}",
+            3.2
+        ), unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown(create_kpi_card(
+            "目標達成率",
+            f"{achievement_rate:.1f}%",
+            achievement_rate - 100 if target_value > 0 else None
+        ), unsafe_allow_html=True)
+    
+    # トレンド分析
+    st.markdown("### 📈 トレンド分析")
+    
+    view_type = st.radio("表示形式", ["週次", "月次"], horizontal=True, key="dept_view_type")
+    
+    if view_type == "週次":
+        summary_data = analyze_department_summary(dept_data, selected_dept)
+        if not summary_data.empty:
+            fig = plot_department_graph(summary_data, selected_dept, target_dict, 4)
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # 詳細分析
+    st.markdown("### 🔍 詳細分析")
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["👨‍⚕️ 術者分析", "📅 時間分析", "📊 統計情報", "📈 累積実績"])
+    
+    with tab1:
+        st.subheader(f"{selected_dept} 術者別分析 (Top 10)")
+        
+        # 強化された術者分析を使用（改行コード対応）
+        surgeon_summary = analyze_surgeon_data_enhanced(dept_data, selected_dept)
+        
+        if not surgeon_summary.empty:
+            # 棒グラフ
+            fig_surgeon = px.bar(
+                x=surgeon_summary.values,
+                y=surgeon_summary.index,
+                orientation='h',
+                title=f"{selected_dept} 術者別件数 (Top 10) - 改行コード対応",
+                text=surgeon_summary.values
             )
-        ]
-    )
+            fig_surgeon.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+            fig_surgeon.update_layout(height=500, showlegend=False)
+            fig_surgeon.update_xaxes(title="手術件数")
+            fig_surgeon.update_yaxes(title="術者", categoryorder='total ascending')
+            st.plotly_chart(fig_surgeon, use_container_width=True)
+            
+            # 詳細テーブル
+            surgeon_df = pd.DataFrame({
+                '順位': range(1, len(surgeon_summary) + 1),
+                '術者': surgeon_summary.index,
+                '件数': surgeon_summary.values,
+                '割合(%)': (surgeon_summary.values / surgeon_summary.sum() * 100).round(1)
+            })
+            
+            st.markdown("#### 📋 術者別詳細データ")
+            st.dataframe(
+                surgeon_df.style.format({
+                    '件数': '{:.1f}',
+                    '割合(%)': '{:.1f}%'
+                }).apply(lambda x: [
+                    'background-color: rgba(31, 119, 180, 0.1)' if i % 2 == 0 else ''
+                    for i in range(len(x))
+                ], axis=1),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # 統計情報
+            st.markdown("#### 📈 術者統計サマリー")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("総術者数", len(surgeon_summary))
+            with col2:
+                st.metric("平均件数/術者", f"{surgeon_summary.mean():.1f}")
+            with col3:
+                st.metric("最多術者件数", f"{surgeon_summary.iloc[0]:.1f}")
+                
+        else:
+            st.info("術者情報が利用できません。")
     
-    return fig
+    with tab2:
+        # 時間分析
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 曜日別分布
+            dept_data_copy = dept_data.copy()
+            dept_data_copy['曜日'] = dept_data_copy['手術実施日_dt'].dt.day_name()
+            weekday_dist = dept_data_copy.groupby('曜日').size()
+            
+            fig_week = px.pie(
+                values=weekday_dist.values,
+                names=weekday_dist.index,
+                title="曜日別手術分布"
+            )
+            fig_week.update_layout(height=400)
+            st.plotly_chart(fig_week, use_container_width=True)
+        
+        with col2:
+            # 月別分析
+            dept_data_copy['月'] = dept_data_copy['手術実施日_dt'].dt.month
+            monthly_dist = dept_data_copy.groupby('月').size()
+            
+            fig_month = px.bar(
+                x=monthly_dist.index,
+                y=monthly_dist.values,
+                title="月別手術件数"
+            )
+            fig_month.update_layout(height=400)
+            st.plotly_chart(fig_month, use_container_width=True)
+    
+    with tab3:
+        # 統計情報
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("📊 基本統計")
+            st.write(f"**データ期間**: {dept_data['手術実施日_dt'].min().strftime('%Y/%m/%d')} ～ {dept_data['手術実施日_dt'].max().strftime('%Y/%m/%d')}")
+            st.write(f"**総手術日数**: {dept_data['手術実施日_dt'].nunique()}日")
+            st.write(f"**総手術件数**: {len(dept_data)}件")
+            st.write(f"**1日最大件数**: {dept_data.groupby('手術実施日_dt').size().max()}件")
+            st.write(f"**1日平均件数**: {dept_data.groupby('手術実施日_dt').size().mean():.1f}件")
+        
+        with col2:
+            st.write("🎯 目標関連")
+            if target_value > 0:
+                st.write(f"**週間目標**: {target_value}件")
+                st.write(f"**現在週平均**: {weekly_avg_gas:.1f}件")
+                gap = weekly_avg_gas - target_value
+                if gap >= 0:
+                    st.success(f"**目標との差**: +{gap:.1f}件 (達成)")
+                else:
+                    st.warning(f"**目標との差**: {gap:.1f}件 (未達)")
+            else:
+                st.info("この診療科の目標は設定されていません。")
+    
+    with tab4:
+        # 累積実績 vs 目標 推移 (今年度週次)
+        st.subheader(f"📊 {selected_dept}：累積実績 vs 目標 推移 (今年度週次)")
+        
+        current_year = latest_date.year
+        fiscal_year_start_year = current_year if latest_date.month >= 4 else current_year - 1
+        cum_start_date = pd.Timestamp(f'{fiscal_year_start_year}-04-01')
+        cum_end_date = latest_date
+        
+        st.caption(f"集計期間: {cum_start_date.strftime('%Y/%m/%d')} ～ {cum_end_date.strftime('%Y/%m/%d')}")
+        
+        current_weekly_target = target_dict.get(selected_dept, 0) if target_dict else 0
+        
+        if current_weekly_target <= 0:
+            st.warning(f"{selected_dept} の週次目標値が0または未設定のため、目標ラインは表示されません。")
+        
+        if cum_start_date <= cum_end_date:
+            # フィルタリング条件
+            df_dept_period_for_cum = df_gas[
+                (df_gas["実施診療科"] == selected_dept) &
+                (df_gas["手術実施日_dt"] >= cum_start_date) &
+                (df_gas["手術実施日_dt"] <= cum_end_date)
+            ].copy()
+            
+            if not df_dept_period_for_cum.empty:
+                cumulative_data = calculate_cumulative_cases(df_dept_period_for_cum, selected_dept, current_weekly_target)
+                
+                if not cumulative_data.empty:
+                    fig_cumulative = plot_cumulative_cases(cumulative_data, selected_dept)
+                    st.plotly_chart(fig_cumulative, use_container_width=True)
+                    
+                    with st.expander("累積データテーブル (今年度週次)"):
+                        display_cols_cum = ['週','週次実績','累積実績件数', '累積目標件数']
+                        valid_display_cols = [col for col in display_cols_cum if col in cumulative_data.columns]
+                        if valid_display_cols:
+                            st.dataframe(cumulative_data[valid_display_cols], use_container_width=True)
+                else:
+                    st.info(f"今年度の {selected_dept} の累積データがありません。")
+            else:
+                st.info(f"今年度に {selected_dept} のデータがありません。")
 
 def render_sidebar():
     """サイドバーを描画"""
