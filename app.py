@@ -670,6 +670,122 @@ def render_upload_section():
         except Exception as e:
             st.error(f"❌ データ統合エラー: {e}")
 
+def create_department_dashboard(df_gas, target_dict, latest_date):
+    """診療科ごとのパフォーマンスダッシュボードを作成"""
+    
+    st.subheader("📊 診療科別パフォーマンスダッシュボード（直近4週データ分析）")
+    
+    # ターゲット診療科（固定）
+    target_departments = [
+        "皮膚科", "整形外科", "産婦人科", "歯科口腔外科", "耳鼻咽喉科", 
+        "泌尿器科", "一般消化器外科", "呼吸器外科", "心臓血管外科", 
+        "乳腺外科", "形成外科", "脳神経外科"
+    ]
+    
+    # 存在確認（データと目標値が設定されている診療科のみ表示）
+    available_departments = []
+    for dept in target_departments:
+        if dept in target_dict and dept in df_gas['実施診療科'].unique():
+            available_departments.append(dept)
+    
+    if not available_departments:
+        st.warning("表示可能な診療科データがありません。")
+        return
+    
+    # メトリクスの準備
+    metrics_data = []
+    
+    for dept in available_departments:
+        # 直近30日のデータを抽出
+        period_end = latest_date
+        period_start = period_end - pd.Timedelta(days=30)
+        
+        dept_recent_df = df_gas[
+            (df_gas['実施診療科'] == dept) &
+            (df_gas['手術実施日_dt'] >= period_start) &
+            (df_gas['手術実施日_dt'] <= period_end) &
+            (df_gas['麻酔種別'].str.contains("全身麻酔", na=False)) &
+            (df_gas['麻酔種別'].str.contains("20分以上", na=False))
+        ]
+        
+        # 週あたりの件数を集計
+        weekly_count = len(dept_recent_df) / 4.3  # 約4.3週間分
+        
+        # 目標値と達成率
+        target = target_dict.get(dept, 0)
+        achievement_rate = (weekly_count / target * 100) if target > 0 else 0
+        
+        metrics_data.append({
+            "診療科": dept,
+            "直近4週平均": weekly_count,
+            "週間目標": target,
+            "達成率": achievement_rate,
+            "状態": "達成" if achievement_rate >= 100 else 
+                   "注意" if achievement_rate >= 80 else "未達成"
+        })
+    
+    # データフレーム作成と降順ソート
+    metrics_df = pd.DataFrame(metrics_data)
+    metrics_df = metrics_df.sort_values("達成率", ascending=False)
+    
+    # ダッシュボード表示（3列レイアウト）
+    cols = st.columns(3)
+    
+    for i, (_, row) in enumerate(metrics_df.iterrows()):
+        col_index = i % 3
+        with cols[col_index]:
+            # メトリクスカードの背景色を達成状況に応じて設定
+            if row["状態"] == "達成":
+                card_color = "rgba(76, 175, 80, 0.1)"  # 緑 (薄く)
+                text_color = "#4CAF50"  # 緑
+                border_color = "#4CAF50"
+            elif row["状態"] == "注意":
+                card_color = "rgba(255, 152, 0, 0.1)"  # オレンジ (薄く)
+                text_color = "#FF9800"  # オレンジ
+                border_color = "#FF9800"
+            else:
+                card_color = "rgba(244, 67, 54, 0.1)"  # 赤 (薄く)
+                text_color = "#F44336"  # 赤
+                border_color = "#F44336"
+            
+            # カスタムHTMLを使用してメトリクスカードを作成
+            html = f"""
+            <div style="background-color: {card_color}; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; border-left: 4px solid {border_color};">
+                <h4 style="margin-top: 0; color: {text_color}; font-size: 1.1rem;">{row["診療科"]}</h4>
+                <div style="margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.9rem; color: #666;">週平均:</span>
+                    <span style="font-weight: bold; font-size: 1.1rem; color: #333;">{row["直近4週平均"]:.1f} 件</span>
+                </div>
+                <div style="margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.9rem; color: #666;">目標:</span>
+                    <span style="font-size: 1rem; color: #333;">{row["週間目標"]} 件</span>
+                </div>
+                <div style="margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.9rem; color: #666;">達成率:</span>
+                    <span style="font-weight: bold; color: {text_color}; font-size: 1.1rem;">{row["達成率"]:.1f}%</span>
+                </div>
+                <div style="background-color: #e0e0e0; height: 6px; border-radius: 3px; margin-top: 0.5rem;">
+                    <div style="background-color: {border_color}; width: {min(row["達成率"], 100)}%; height: 100%; border-radius: 3px;"></div>
+                </div>
+            </div>
+            """
+            st.markdown(html, unsafe_allow_html=True)
+    
+    # 詳細テーブルを折りたたみセクションで表示
+    with st.expander("詳細データテーブル", expanded=False):
+        st.dataframe(
+            metrics_df.style
+                .format({"直近4週平均": "{:.1f}", "達成率": "{:.1f}%"})
+                .apply(lambda x: [
+                    f"background-color: rgba(76, 175, 80, 0.2)" if x["達成率"] >= 100 else
+                    f"background-color: rgba(255, 152, 0, 0.2)" if x["達成率"] >= 80 else
+                    f"background-color: rgba(244, 67, 54, 0.2)"
+                    for _ in range(len(x))
+                ], axis=1),
+            hide_index=True,
+            use_container_width=True
+        )
+
 def render_hospital_analysis():
     """病院全体分析画面（修正版）"""
     st.header("🏥 病院全体分析")
@@ -683,6 +799,11 @@ def render_hospital_analysis():
     latest_date = st.session_state.get('latest_date')
     
     st.info(f"分析対象期間: {df_gas['手術実施日_dt'].min().strftime('%Y/%m/%d')} ～ {latest_date.strftime('%Y/%m/%d')}")
+    
+    # 診療科別パフォーマンスダッシュボードを追加
+    create_department_dashboard(df_gas, target_dict, latest_date)
+    
+    st.markdown("---")
     
     # 分析設定
     col1, col2, col3 = st.columns(3)
