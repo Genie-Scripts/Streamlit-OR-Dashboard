@@ -1,4 +1,4 @@
-# app_dashboard.py - 改修版ダッシュボード形式手術分析アプリ
+# app_dashboard.py - 改修版ダッシュボード形式手術分析アプリ（改行コード対応版）
 import streamlit as st
 import traceback
 import pandas as pd
@@ -131,7 +131,7 @@ st.markdown("""
 # モジュールインポート（エラーハンドリング付き）
 try:
     from loader import load_single_file, merge_base_and_updates
-    from analyzer import analyze_hospital_summary, analyze_department_summary, calculate_recent_averages, filter_data_by_period # ← この行のコメントを解除
+    from analyzer import analyze_hospital_summary, analyze_department_summary, calculate_recent_averages, filter_data_by_period
     from monthly_quarterly_analyzer import analyze_monthly_summary, analyze_quarterly_summary
     from target_loader import load_target_file
     from plotter import plot_summary_graph, plot_department_graph
@@ -143,7 +143,6 @@ try:
 except Exception as e:
     st.error(f"モジュールの読み込み中に予期せぬエラーが発生しました。")
     st.error(f"エラー内容: {e}")
-    # 詳細なエラー情報を表示
     st.code(traceback.format_exc())
     MODULES_LOADED = False
 
@@ -158,6 +157,64 @@ def initialize_session_state():
         st.session_state['latest_date'] = None
     if 'current_view' not in st.session_state:
         st.session_state['current_view'] = 'dashboard'
+
+def split_surgeon_names_by_newline(name_string):
+    """改行コードで術者名を分割する関数"""
+    if not name_string or pd.isna(name_string):
+        return []
+    
+    name_string = str(name_string).strip()
+    
+    # 無効値のチェック
+    if name_string.lower() in ['nan', 'null', '', 'なし', '-']:
+        return []
+    
+    # 改行コードで分割（\r\n, \n両方に対応）
+    if '\r\n' in name_string:
+        parts = [part.strip() for part in name_string.split('\r\n')]
+    elif '\n' in name_string:
+        parts = [part.strip() for part in name_string.split('\n')]
+    else:
+        # 改行コードがない場合は単一の術者として扱う
+        return [name_string]
+    
+    # 空文字列を除去
+    return [part for part in parts if part]
+
+def clean_surgeon_name(name):
+    """術者名をクリーニングする関数"""
+    if not name:
+        return None
+    
+    name = str(name).strip()
+    
+    # 無効な値を除外
+    if (name.lower() in ['nan', 'null', 'なし', '-', '他', 'その他', '不明', '外来', '当直'] or
+        len(name) < 2):
+        return None
+    
+    # 全角・半角の統一
+    name = name.replace('（', '(').replace('）', ')').replace('　', ' ')
+    
+    # 括弧内の情報を除去（役職など）
+    if '(' in name and ')' in name:
+        name = name.split('(')[0].strip()
+    
+    # 敬称の除去
+    suffixes = ['先生', '医師', 'Dr.', 'Dr', 'MD', '教授', '准教授', '講師', '助教']
+    for suffix in suffixes:
+        if name.endswith(suffix):
+            name = name[:-len(suffix)].strip()
+    
+    # 数字のみの場合は除外
+    if name.isdigit():
+        return None
+    
+    # 最終的な妥当性チェック
+    if len(name) >= 2 and not name.isdigit():
+        return name
+    
+    return None
 
 def calculate_operating_room_utilization(df_gas, latest_date):
     """手術室稼働率を計算"""
@@ -249,50 +306,328 @@ def calculate_operating_room_utilization(df_gas, latest_date):
         print(f"稼働率計算エラー: {e}")
         return 0.0
 
-def analyze_surgeon_data(df_dept, dept_name):
-    """複数術者に対応した術者分析"""
-    if "実施術者" not in df_dept.columns:
+def analyze_surgeon_data_enhanced(df_dept, dept_name):
+    """改良版術者分析（改行コード対応版）"""
+    surgeon_column = None
+    
+    # 術者列を特定
+    for col in df_dept.columns:
+        if '術者' in col or '実施術者' in col or 'surgeon' in col.lower():
+            surgeon_column = col
+            break
+    
+    if not surgeon_column:
         return pd.DataFrame()
     
-    # 術者データの前処理
-    surgeon_data = []
+    surgeon_records = []
     
     for _, row in df_dept.iterrows():
-        surgeons_str = str(row["実施術者"])
-        if pd.isna(surgeons_str) or surgeons_str.lower() in ['nan', 'null', '']:
-            continue
-            
-        # 複数術者の分割（カンマ、セミコロン、スラッシュで分割）
-        separators = [',', ';', '/', '・', '、']
-        surgeons = [surgeons_str]
+        surgeons_str = str(row[surgeon_column])
         
-        for sep in separators:
-            new_surgeons = []
-            for surgeon in surgeons:
-                new_surgeons.extend([s.strip() for s in surgeon.split(sep)])
-            surgeons = new_surgeons
+        # 改行コードで複数術者を分割
+        individual_names = split_surgeon_names_by_newline(surgeons_str)
         
-        # 空文字列や無効な値を除外
-        surgeons = [s for s in surgeons if s and s.lower() not in ['nan', 'null', 'なし', '-']]
+        # 各名前をクリーニング
+        cleaned_names = []
+        for name in individual_names:
+            cleaned_name = clean_surgeon_name(name)
+            if cleaned_name:
+                cleaned_names.append(cleaned_name)
+        
+        # 重複除去（順序保持）
+        unique_names = list(dict.fromkeys(cleaned_names))
         
         # 各術者に対してレコードを作成
-        for surgeon in surgeons:
-            surgeon_data.append({
-                '術者': surgeon,
-                '手術実施日_dt': row['手術実施日_dt'],
+        for surgeon_name in unique_names:
+            surgeon_records.append({
+                '術者': surgeon_name,
+                '手術実施日_dt': row.get('手術実施日_dt', row.get('手術実施日', None)),
                 '診療科': dept_name,
-                '件数': 1 / len(surgeons)  # 複数術者の場合は分割
+                '重み': 1.0 / len(unique_names) if len(unique_names) > 1 else 1.0
             })
     
-    if not surgeon_data:
+    if not surgeon_records:
         return pd.DataFrame()
     
-    surgeon_df = pd.DataFrame(surgeon_data)
+    surgeon_df = pd.DataFrame(surgeon_records)
     
-    # 術者別集計
-    surgeon_summary = surgeon_df.groupby('術者')['件数'].sum().round(1).sort_values(ascending=False)
+    # 術者別集計（重みを考慮）
+    surgeon_summary = surgeon_df.groupby('術者')['重み'].sum().round(1).sort_values(ascending=False)
     
     return surgeon_summary.head(10)
+
+def create_comprehensive_surgeon_analysis(df_gas, target_dict):
+    """全診療科の術者分析を作成（改行コード対応版）"""
+    st.header("👨‍⚕️ 総合術者分析（改行コード対応版）")
+    
+    if df_gas is None or df_gas.empty:
+        st.warning("データが読み込まれていません。")
+        return
+    
+    # 術者列を特定
+    surgeon_column = None
+    for col in df_gas.columns:
+        if '術者' in col or '実施術者' in col or 'surgeon' in col.lower():
+            surgeon_column = col
+            break
+    
+    if not surgeon_column:
+        st.error("術者列が見つかりません。利用可能な列:")
+        st.write(list(df_gas.columns))
+        return
+    
+    # 分割処理のテスト表示（実際のデータ例で）
+    st.subheader("🔍 分割処理テスト（実データ例）")
+    
+    sample_data = df_gas[surgeon_column].dropna().head(10)
+    st.write(f"**実データでの分割処理例（{surgeon_column}列）:**")
+    
+    for i, example in enumerate(sample_data):
+        if example and len(str(example)) > 5:  # 複数術者っぽいデータのみ表示
+            split_result = split_surgeon_names_by_newline(example)
+            if len(split_result) > 1:
+                st.write(f"例{i+1}: `{example}` → {split_result}")
+    
+    st.markdown("---")
+    
+    # 全診療科の術者データを統合分析
+    all_surgeon_records = []
+    
+    for dept in df_gas['実施診療科'].dropna().unique():
+        dept_data = df_gas[df_gas['実施診療科'] == dept]
+        
+        for _, row in dept_data.iterrows():
+            surgeons_str = str(row[surgeon_column])
+            
+            # 改行コードで複数術者を分割
+            individual_names = split_surgeon_names_by_newline(surgeons_str)
+            
+            # 各名前をクリーニング
+            cleaned_names = []
+            for name in individual_names:
+                cleaned_name = clean_surgeon_name(name)
+                if cleaned_name:
+                    cleaned_names.append(cleaned_name)
+            
+            # 重複除去
+            unique_names = list(dict.fromkeys(cleaned_names))
+            
+            # 各術者のレコードを作成
+            for surgeon_name in unique_names:
+                all_surgeon_records.append({
+                    '術者': surgeon_name,
+                    '診療科': dept,
+                    '手術実施日_dt': row.get('手術実施日_dt', row.get('手術実施日', None)),
+                    '重み': 1.0 / len(unique_names) if len(unique_names) > 1 else 1.0
+                })
+    
+    if not all_surgeon_records:
+        st.warning("分析可能な術者データがありません。")
+        return
+    
+    all_surgeon_df = pd.DataFrame(all_surgeon_records)
+    
+    # 全体ランキング
+    surgeon_ranking = all_surgeon_df.groupby('術者')['重み'].sum().round(1).sort_values(ascending=False)
+    
+    # 表示
+    st.subheader("🏆 個別術者ランキング (Top 30)")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # トップ30のグラフ
+        top_30 = surgeon_ranking.head(30)
+        fig_all = px.bar(
+            x=top_30.values,
+            y=top_30.index,
+            orientation='h',
+            title="術者別手術件数 (Top 30) - 改行コード分割対応",
+            text=top_30.values
+        )
+        fig_all.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+        fig_all.update_layout(height=900, showlegend=False)
+        fig_all.update_xaxis(title="手術件数")
+        fig_all.update_yaxis(title="術者", categoryorder='total ascending')
+        st.plotly_chart(fig_all, use_container_width=True)
+    
+    with col2:
+        # 統計情報
+        st.markdown("#### 📊 分割後統計")
+        st.metric("総術者数", len(surgeon_ranking))
+        st.metric("総手術件数", f"{surgeon_ranking.sum():.1f}")
+        st.metric("平均件数/術者", f"{surgeon_ranking.mean():.1f}")
+        st.metric("最多術者件数", f"{surgeon_ranking.iloc[0]:.1f}")
+        
+        st.markdown("#### 🔍 分割効果")
+        # 分割前のデータサンプル表示
+        original_surgeons = df_gas[surgeon_column].value_counts().head(10)
+        st.write("**分割前Top5:**")
+        for surgeon, count in original_surgeons.head(5).items():
+            # 長い場合は省略表示
+            display_name = surgeon if len(str(surgeon)) < 30 else str(surgeon)[:30] + "..."
+            st.write(f"{display_name}: {count}")
+        
+        st.write("**分割後Top5:**")
+        for surgeon, count in surgeon_ranking.head(5).items():
+            st.write(f"{surgeon}: {count:.1f}")
+    
+    # 詳細テーブル
+    st.subheader("📋 詳細ランキングテーブル (Top 50)")
+    
+    # 診療科別件数も追加
+    surgeon_dept_summary = all_surgeon_df.groupby(['術者', '診療科'])['重み'].sum().unstack(fill_value=0)
+    surgeon_total = surgeon_dept_summary.sum(axis=1).round(1).sort_values(ascending=False)
+    
+    # トップ50の詳細テーブル
+    top_50_surgeons = surgeon_total.head(50).index
+    detail_data = []
+    
+    for i, surgeon in enumerate(top_50_surgeons, 1):
+        total_cases = surgeon_total[surgeon]
+        main_dept = surgeon_dept_summary.loc[surgeon].idxmax()  # 最も件数が多い診療科
+        main_dept_cases = surgeon_dept_summary.loc[surgeon, main_dept]
+        
+        detail_data.append({
+            '順位': i,
+            '術者': surgeon,
+            '総件数': total_cases,
+            '主要診療科': main_dept,
+            '主要診療科件数': main_dept_cases,
+            '診療科数': (surgeon_dept_summary.loc[surgeon] > 0).sum()
+        })
+    
+    detail_df = pd.DataFrame(detail_data)
+    
+    st.dataframe(
+        detail_df.style.format({
+            '総件数': '{:.1f}',
+            '主要診療科件数': '{:.1f}'
+        }).apply(lambda x: [
+            'background-color: rgba(255, 215, 0, 0.3)' if x['順位'] <= 3 else
+            'background-color: rgba(192, 192, 192, 0.3)' if x['順位'] <= 10 else
+            'background-color: rgba(31, 119, 180, 0.1)' if x['順位'] % 2 == 0 else ''
+            for _ in range(len(x))
+        ], axis=1),
+        use_container_width=True,
+        hide_index=True
+    )
+
+def create_department_dashboard(df_gas, target_dict, latest_date):
+    """診療科ごとのパフォーマンスダッシュボードを作成"""
+    
+    st.subheader("📊 診療科別パフォーマンスダッシュボード（直近4週データ分析）")
+    
+    # ターゲット診療科（固定）
+    target_departments = [
+        "皮膚科", "整形外科", "産婦人科", "歯科口腔外科", "耳鼻咽喉科", 
+        "泌尿器科", "一般消化器外科", "呼吸器外科", "心臓血管外科", 
+        "乳腺外科", "形成外科", "脳神経外科"
+    ]
+    
+    # 存在確認（データと目標値が設定されている診療科のみ表示）
+    available_departments = []
+    for dept in target_departments:
+        if dept in target_dict and dept in df_gas['実施診療科'].unique():
+            available_departments.append(dept)
+    
+    if not available_departments:
+        st.warning("表示可能な診療科データがありません。")
+        return
+    
+    # メトリクスの準備
+    metrics_data = []
+    
+    for dept in available_departments:
+        # 直近30日のデータを抽出
+        period_end = latest_date
+        period_start = period_end - pd.Timedelta(days=30)
+        
+        dept_recent_df = df_gas[
+            (df_gas['実施診療科'] == dept) &
+            (df_gas['手術実施日_dt'] >= period_start) &
+            (df_gas['手術実施日_dt'] <= period_end) &
+            (df_gas['麻酔種別'].str.contains("全身麻酔", na=False)) &
+            (df_gas['麻酔種別'].str.contains("20分以上", na=False))
+        ]
+        
+        # 週あたりの件数を集計
+        weekly_count = len(dept_recent_df) / 4.3  # 約4.3週間分
+        
+        # 目標値と達成率
+        target = target_dict.get(dept, 0)
+        achievement_rate = (weekly_count / target * 100) if target > 0 else 0
+        
+        metrics_data.append({
+            "診療科": dept,
+            "直近4週平均": weekly_count,
+            "週間目標": target,
+            "達成率": achievement_rate,
+            "状態": "達成" if achievement_rate >= 100 else 
+                   "注意" if achievement_rate >= 80 else "未達成"
+        })
+    
+    # データフレーム作成と降順ソート
+    metrics_df = pd.DataFrame(metrics_data)
+    metrics_df = metrics_df.sort_values("達成率", ascending=False)
+    
+    # ダッシュボード表示（3列レイアウト）
+    cols = st.columns(3)
+    
+    for i, (_, row) in enumerate(metrics_df.iterrows()):
+        col_index = i % 3
+        with cols[col_index]:
+            # メトリクスカードの背景色を達成状況に応じて設定
+            if row["状態"] == "達成":
+                card_color = "rgba(76, 175, 80, 0.1)"  # 緑 (薄く)
+                text_color = "#4CAF50"  # 緑
+                border_color = "#4CAF50"
+            elif row["状態"] == "注意":
+                card_color = "rgba(255, 152, 0, 0.1)"  # オレンジ (薄く)
+                text_color = "#FF9800"  # オレンジ
+                border_color = "#FF9800"
+            else:
+                card_color = "rgba(244, 67, 54, 0.1)"  # 赤 (薄く)
+                text_color = "#F44336"  # 赤
+                border_color = "#F44336"
+            
+            # カスタムHTMLを使用してメトリクスカードを作成
+            html = f"""
+            <div style="background-color: {card_color}; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; border-left: 4px solid {border_color};">
+                <h4 style="margin-top: 0; color: {text_color}; font-size: 1.1rem;">{row["診療科"]}</h4>
+                <div style="margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.9rem; color: #666;">週平均:</span>
+                    <span style="font-weight: bold; font-size: 1.1rem; color: #333;">{row["直近4週平均"]:.1f} 件</span>
+                </div>
+                <div style="margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.9rem; color: #666;">目標:</span>
+                    <span style="font-size: 1rem; color: #333;">{row["週間目標"]} 件</span>
+                </div>
+                <div style="margin-bottom: 0.5rem;">
+                    <span style="font-size: 0.9rem; color: #666;">達成率:</span>
+                    <span style="font-weight: bold; color: {text_color}; font-size: 1.1rem;">{row["達成率"]:.1f}%</span>
+                </div>
+                <div style="background-color: #e0e0e0; height: 6px; border-radius: 3px; margin-top: 0.5rem;">
+                    <div style="background-color: {border_color}; width: {min(row["達成率"], 100)}%; height: 100%; border-radius: 3px;"></div>
+                </div>
+            </div>
+            """
+            st.markdown(html, unsafe_allow_html=True)
+    
+    # 詳細テーブルを折りたたみセクションで表示
+    with st.expander("詳細データテーブル", expanded=False):
+        st.dataframe(
+            metrics_df.style
+                .format({"直近4週平均": "{:.1f}", "達成率": "{:.1f}%"})
+                .apply(lambda x: [
+                    f"background-color: rgba(76, 175, 80, 0.2)" if x["達成率"] >= 100 else
+                    f"background-color: rgba(255, 152, 0, 0.2)" if x["達成率"] >= 80 else
+                    f"background-color: rgba(244, 67, 54, 0.2)"
+                    for _ in range(len(x))
+                ], axis=1),
+            hide_index=True,
+            use_container_width=True
+        )
 
 def create_kpi_card(title, value, change=None, change_label="前期比"):
     """KPIカードを作成"""
@@ -670,122 +1005,6 @@ def render_upload_section():
         except Exception as e:
             st.error(f"❌ データ統合エラー: {e}")
 
-def create_department_dashboard(df_gas, target_dict, latest_date):
-    """診療科ごとのパフォーマンスダッシュボードを作成"""
-    
-    st.subheader("📊 診療科別パフォーマンスダッシュボード（直近4週データ分析）")
-    
-    # ターゲット診療科（固定）
-    target_departments = [
-        "皮膚科", "整形外科", "産婦人科", "歯科口腔外科", "耳鼻咽喉科", 
-        "泌尿器科", "一般消化器外科", "呼吸器外科", "心臓血管外科", 
-        "乳腺外科", "形成外科", "脳神経外科"
-    ]
-    
-    # 存在確認（データと目標値が設定されている診療科のみ表示）
-    available_departments = []
-    for dept in target_departments:
-        if dept in target_dict and dept in df_gas['実施診療科'].unique():
-            available_departments.append(dept)
-    
-    if not available_departments:
-        st.warning("表示可能な診療科データがありません。")
-        return
-    
-    # メトリクスの準備
-    metrics_data = []
-    
-    for dept in available_departments:
-        # 直近30日のデータを抽出
-        period_end = latest_date
-        period_start = period_end - pd.Timedelta(days=30)
-        
-        dept_recent_df = df_gas[
-            (df_gas['実施診療科'] == dept) &
-            (df_gas['手術実施日_dt'] >= period_start) &
-            (df_gas['手術実施日_dt'] <= period_end) &
-            (df_gas['麻酔種別'].str.contains("全身麻酔", na=False)) &
-            (df_gas['麻酔種別'].str.contains("20分以上", na=False))
-        ]
-        
-        # 週あたりの件数を集計
-        weekly_count = len(dept_recent_df) / 4.3  # 約4.3週間分
-        
-        # 目標値と達成率
-        target = target_dict.get(dept, 0)
-        achievement_rate = (weekly_count / target * 100) if target > 0 else 0
-        
-        metrics_data.append({
-            "診療科": dept,
-            "直近4週平均": weekly_count,
-            "週間目標": target,
-            "達成率": achievement_rate,
-            "状態": "達成" if achievement_rate >= 100 else 
-                   "注意" if achievement_rate >= 80 else "未達成"
-        })
-    
-    # データフレーム作成と降順ソート
-    metrics_df = pd.DataFrame(metrics_data)
-    metrics_df = metrics_df.sort_values("達成率", ascending=False)
-    
-    # ダッシュボード表示（3列レイアウト）
-    cols = st.columns(3)
-    
-    for i, (_, row) in enumerate(metrics_df.iterrows()):
-        col_index = i % 3
-        with cols[col_index]:
-            # メトリクスカードの背景色を達成状況に応じて設定
-            if row["状態"] == "達成":
-                card_color = "rgba(76, 175, 80, 0.1)"  # 緑 (薄く)
-                text_color = "#4CAF50"  # 緑
-                border_color = "#4CAF50"
-            elif row["状態"] == "注意":
-                card_color = "rgba(255, 152, 0, 0.1)"  # オレンジ (薄く)
-                text_color = "#FF9800"  # オレンジ
-                border_color = "#FF9800"
-            else:
-                card_color = "rgba(244, 67, 54, 0.1)"  # 赤 (薄く)
-                text_color = "#F44336"  # 赤
-                border_color = "#F44336"
-            
-            # カスタムHTMLを使用してメトリクスカードを作成
-            html = f"""
-            <div style="background-color: {card_color}; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; border-left: 4px solid {border_color};">
-                <h4 style="margin-top: 0; color: {text_color}; font-size: 1.1rem;">{row["診療科"]}</h4>
-                <div style="margin-bottom: 0.5rem;">
-                    <span style="font-size: 0.9rem; color: #666;">週平均:</span>
-                    <span style="font-weight: bold; font-size: 1.1rem; color: #333;">{row["直近4週平均"]:.1f} 件</span>
-                </div>
-                <div style="margin-bottom: 0.5rem;">
-                    <span style="font-size: 0.9rem; color: #666;">目標:</span>
-                    <span style="font-size: 1rem; color: #333;">{row["週間目標"]} 件</span>
-                </div>
-                <div style="margin-bottom: 0.5rem;">
-                    <span style="font-size: 0.9rem; color: #666;">達成率:</span>
-                    <span style="font-weight: bold; color: {text_color}; font-size: 1.1rem;">{row["達成率"]:.1f}%</span>
-                </div>
-                <div style="background-color: #e0e0e0; height: 6px; border-radius: 3px; margin-top: 0.5rem;">
-                    <div style="background-color: {border_color}; width: {min(row["達成率"], 100)}%; height: 100%; border-radius: 3px;"></div>
-                </div>
-            </div>
-            """
-            st.markdown(html, unsafe_allow_html=True)
-    
-    # 詳細テーブルを折りたたみセクションで表示
-    with st.expander("詳細データテーブル", expanded=False):
-        st.dataframe(
-            metrics_df.style
-                .format({"直近4週平均": "{:.1f}", "達成率": "{:.1f}%"})
-                .apply(lambda x: [
-                    f"background-color: rgba(76, 175, 80, 0.2)" if x["達成率"] >= 100 else
-                    f"background-color: rgba(255, 152, 0, 0.2)" if x["達成率"] >= 80 else
-                    f"background-color: rgba(244, 67, 54, 0.2)"
-                    for _ in range(len(x))
-                ], axis=1),
-            hide_index=True,
-            use_container_width=True
-        )
-
 def render_hospital_analysis():
     """病院全体分析画面（修正版）"""
     st.header("🏥 病院全体分析")
@@ -1027,7 +1246,9 @@ def render_department_analysis():
     
     with tab1:
         st.subheader(f"{selected_dept} 術者別分析 (Top 10)")
-        surgeon_summary = analyze_surgeon_data(dept_data, selected_dept)
+        
+        # 強化された術者分析を使用（改行コード対応）
+        surgeon_summary = analyze_surgeon_data_enhanced(dept_data, selected_dept)
         
         if not surgeon_summary.empty:
             # 棒グラフ
@@ -1035,20 +1256,46 @@ def render_department_analysis():
                 x=surgeon_summary.values,
                 y=surgeon_summary.index,
                 orientation='h',
-                title=f"{selected_dept} 術者別件数 (Top 10)",
+                title=f"{selected_dept} 術者別件数 (Top 10) - 改行コード対応",
                 text=surgeon_summary.values
             )
             fig_surgeon.update_traces(texttemplate='%{text:.1f}', textposition='outside')
-            fig_surgeon.update_layout(height=400)
+            fig_surgeon.update_layout(height=500, showlegend=False)
+            fig_surgeon.update_xaxis(title="手術件数")
+            fig_surgeon.update_yaxis(title="術者", categoryorder='total ascending')
             st.plotly_chart(fig_surgeon, use_container_width=True)
             
             # 詳細テーブル
             surgeon_df = pd.DataFrame({
+                '順位': range(1, len(surgeon_summary) + 1),
                 '術者': surgeon_summary.index,
                 '件数': surgeon_summary.values,
                 '割合(%)': (surgeon_summary.values / surgeon_summary.sum() * 100).round(1)
             })
-            st.dataframe(surgeon_df, use_container_width=True)
+            
+            st.markdown("#### 📋 術者別詳細データ")
+            st.dataframe(
+                surgeon_df.style.format({
+                    '件数': '{:.1f}',
+                    '割合(%)': '{:.1f}%'
+                }).apply(lambda x: [
+                    'background-color: rgba(31, 119, 180, 0.1)' if i % 2 == 0 else ''
+                    for i in range(len(x))
+                ], axis=1),
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # 統計情報
+            st.markdown("#### 📈 術者統計サマリー")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("総術者数", len(surgeon_summary))
+            with col2:
+                st.metric("平均件数/術者", f"{surgeon_summary.mean():.1f}")
+            with col3:
+                st.metric("最多術者件数", f"{surgeon_summary.iloc[0]:.1f}")
+                
         else:
             st.info("術者情報が利用できません。")
     
@@ -1201,7 +1448,7 @@ def render_sidebar():
         
         # アプリ情報
         st.markdown("### ℹ️ アプリ情報")
-        st.write("**バージョン**: 2.0")
+        st.write("**バージョン**: 2.1 (改行コード対応版)")
         st.write("**最終更新**: 2024/12/19")
         
         # リアルタイム時刻表示
@@ -1273,11 +1520,11 @@ def main():
             # 分析タイプを選択
             analysis_mode = st.radio(
                 "分析モード選択",
-                ["📊 総合術者ランキング", "🔍 従来の術者分析"],
+                ["📊 改行コード対応ランキング", "🔍 従来の術者分析"],
                 horizontal=True
             )
             
-            if analysis_mode == "📊 総合術者ランキング":
+            if analysis_mode == "📊 改行コード対応ランキング":
                 create_comprehensive_surgeon_analysis(df_gas, target_dict)
             else:
                 create_surgeon_analysis(df_gas, target_dict)
