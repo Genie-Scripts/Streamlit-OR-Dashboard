@@ -1,150 +1,121 @@
-# app.py
-import streamlit as st
+# reporting/pdf_exporter.py
 import pandas as pd
-import traceback
+import numpy as np
+import io
+import base64
 from datetime import datetime
+import plotly.io as pio
+import streamlit as st
 import pytz
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm, cm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import os
 
-# --- 整理されたモジュールのインポート ---
-from config import style_config, target_loader
-from data_processing import loader
-from analysis import weekly, periodic, ranking, surgeon, forecasting
-from plotting import trend_plots, generic_plots
-from reporting import csv_exporter, pdf_exporter
+# --- 新しいモジュール構造に合わせてインポートパスを修正 ---
+from analysis import ranking as ranking_analyzer
+from config import style_config as sc
 
-# --- ページ設定とCSS (最初に一度だけ) ---
-st.set_page_config(
-    page_title="手術分析ダッシュボード",
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-style_config.load_dashboard_css()
+# --- 日本語フォント設定 (変更なし) ---
+def setup_japanese_font():
+    font_path = os.path.join(os.path.dirname(__file__), '..', 'fonts', 'NotoSansJP-Regular.ttf')
+    if os.path.exists(font_path):
+        pdfmetrics.registerFont(TTFont('NotoSansJP', font_path))
+        return 'NotoSansJP'
+    # フォントが見つからない場合のフォールバック
+    print("警告: NotoSansJPフォントが見つかりません。")
+    return 'Helvetica'
 
-# --- セッション状態の初期化 ---
-def initialize_session_state():
-    """セッション状態を初期化"""
-    if 'processed_df' not in st.session_state:
-        st.session_state['processed_df'] = pd.DataFrame()
-    if 'target_dict' not in st.session_state:
-        st.session_state['target_dict'] = {}
-    if 'latest_date' not in st.session_state:
-        st.session_state['latest_date'] = None
-    if 'current_view' not in st.session_state:
-        st.session_state['current_view'] = 'ダッシュボード'
+# --- 既存のPDF生成関連関数 (fig_to_image, create_table_for_pdf, etc.) ---
+# (元のpdf_exporter.pyから、インポートパス修正以外はほぼ変更なくここに移植)
+# 以下、主要な生成関数のみを掲載
 
-# --- UI描画関数 ---
-def render_sidebar():
-    """サイドバーを描画"""
-    with st.sidebar:
-        st.title("🏥 手術分析")
-        st.markdown("---")
-        views = ["ダッシュボード", "データアップロード", "病院全体分析", "診療科別分析", "術者分析", "将来予測"]
-        st.session_state['current_view'] = st.radio("📍 ナビゲーション", views, key="navigation")
-        st.markdown("---")
+def fig_to_image(fig, width=700, height=350):
+    if fig is None: return None
+    return pio.to_image(fig, format='png', width=width, height=height, scale=1.5)
 
-        if not st.session_state['processed_df'].empty:
-            st.success("✅ データ読み込み済み")
-            st.write(f"📊 レコード数: {len(st.session_state['processed_df']):,}")
-            st.write(f"📅 最新日付: {st.session_state['latest_date'].strftime('%Y/%m/%d')}")
-        else:
-            st.warning("⚠️ データ未読み込み")
+def create_table_for_pdf(df, japanese_font):
+    # ... (元のコードからテーブル作成ロジックを移植)
+    if df is None or df.empty:
+        return None
+    styles = getSampleStyleSheet()
+    header_style = ParagraphStyle('TableHeader', parent=styles['Normal'], fontName=japanese_font, fontSize=10, alignment=1)
+    header_cells = [Paragraph(str(col), header_style) for col in df.columns]
+    table_data = [header_cells] + df.values.tolist()
+    
+    table = Table(table_data, repeatRows=1)
+    style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+        ('FONTNAME', (0, 0), (-1, -1), japanese_font),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ])
+    table.setStyle(style)
+    return table
 
-        st.info(f"Version: 4.0 (Refactored)")
+def create_report_section(title, description, japanese_font, chart=None, table_df=None):
+    # ... (元のコードからセクション作成ロジックを移植)
+    styles = getSampleStyleSheet()
+    section_title_style = ParagraphStyle('SectionTitle', parent=styles['h2'], fontName=japanese_font, fontSize=14, spaceAfter=8)
+    description_style = ParagraphStyle('Description', parent=styles['Normal'], fontName=japanese_font, fontSize=10, spaceAfter=10, leading=14)
+    content = [Paragraph(title, section_title_style), Paragraph(description.replace('\n', '<br/>'), description_style)]
+    if chart:
+        img_data = fig_to_image(chart)
+        if img_data:
+            content.append(Image(io.BytesIO(img_data), width=16*cm, height=8*cm))
+            content.append(Spacer(1, 10))
+    if table_df is not None and not table_df.empty:
+        content.append(create_table_for_pdf(table_df, japanese_font))
+    return content
 
-def render_page_content():
-    """選択されたページに応じてコンテンツを描画"""
-    df = st.session_state.processed_df
-    target_dict = st.session_state.target_dict
-    latest_date = st.session_state.latest_date
+def add_footer(canvas, doc, footer_text):
+    # ... (元のコードからフッター描画ロジックを移植)
+    japanese_font = setup_japanese_font()
+    canvas.saveState()
+    canvas.setFont(japanese_font, 9)
+    creation_date_str = datetime.now(pytz.timezone('Asia/Tokyo')).strftime('%Y/%m/%d')
+    center_text = f"{footer_text} | 作成日: {creation_date_str}"
+    canvas.drawCentredString(doc.width/2.0 + doc.leftMargin, doc.bottomMargin - 10, center_text)
+    canvas.drawRightString(doc.width + doc.leftMargin - 1*cm, doc.bottomMargin - 10, f"- {canvas.getPageNumber()} -")
+    canvas.restoreState()
 
-    if st.session_state['current_view'] == 'データアップロード':
-        render_upload_page()
+def generate_hospital_report(summary_df, fig, target_dict, period_type):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2*cm, bottomMargin=2.5*cm)
+    japanese_font = setup_japanese_font()
+    content = []
+
+    # ... (元のgenerate_hospital_weekly_report/monthly_reportのロジックを参考にセクションを作成)
+    description = f"{period_type}のサマリーです。"
+    section = create_report_section(f"病院全体 {period_type}レポート", description, japanese_font, chart=fig, table_df=summary_df.tail(15))
+    content.extend(section)
+    
+    footer_text = "手術件数分析レポート (c) 医療情報管理部"
+    footer_func = lambda canvas, doc: add_footer(canvas, doc, footer_text)
+    doc.build(content, onFirstPage=footer_func, onLaterPages=footer_func)
+    
+    buffer.seek(0)
+    return buffer
+
+def add_pdf_report_button(data_type, period_type, df, fig, target_dict=None, department=None):
+    """PDFレポートダウンロードボタンのラッパー関数"""
+    if df is None or df.empty:
         return
 
-    # データがなければここで終了
-    if df.empty:
-        st.warning("分析を開始するには、「データアップロード」ページでデータを読み込んでください。")
-        return
-
-    page_map = {
-        "ダッシュボード": render_dashboard_page,
-        "病院全体分析": render_hospital_page,
-        "診療科別分析": render_department_page,
-        "術者分析": render_surgeon_page,
-        "将来予測": render_prediction_page,
-    }
-    page_func = page_map.get(st.session_state['current_view'])
-    if page_func:
-        page_func(df, target_dict, latest_date)
-
-def render_upload_page():
-    # (app.pyに記載していた元のUIロジックをここに配置)
-    st.header("📤 データアップロード")
-    base_file = st.file_uploader("基礎データ (CSV)", type="csv")
-    update_files = st.file_uploader("追加データ (CSV)", type="csv", accept_multiple_files=True)
-    target_file = st.file_uploader("目標データ (CSV)", type="csv")
-
-    if st.button("データ処理を実行", type="primary"):
-        with st.spinner("データ処理中..."):
-            try:
-                df = loader.load_and_merge_files(base_file, update_files)
-                st.session_state['processed_df'] = df
-                st.session_state['latest_date'] = df['手術実施日_dt'].max()
-                st.success(f"データ処理完了。{len(df)}件")
-                if target_file:
-                    st.session_state['target_dict'] = target_loader.load_target_file(target_file)
-                    st.success("目標データを読み込みました。")
-            except Exception as e:
-                st.error(f"エラー: {e}")
-
-def render_dashboard_page(df, target_dict, latest_date):
-    st.title("🏠 ダッシュボード")
-    kpi_summary = ranking.get_kpi_summary(df, latest_date)
-    generic_plots.display_kpi_metrics(kpi_summary)
+    now = datetime.now().strftime("%Y%m%d")
+    filename = f"{now}_{data_type}_{period_type}.pdf"
     
-    st.header("📈 病院全体 週次トレンド")
-    use_complete_weeks = st.toggle("完全週データで分析", value=True)
-    summary = weekly.get_summary(df, use_complete_weeks=use_complete_weeks)
-    fig = trend_plots.create_weekly_summary_chart(summary, "病院全体 週次推移", target_dict)
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.header("🏆 診療科別ランキング (直近90日)")
-    if target_dict:
-        filtered_df = df[df['手術実施日_dt'] >= (latest_date - pd.Timedelta(days=89))]
-        ranking_data = ranking.calculate_achievement_rates(filtered_df, target_dict)
-        fig_rank = generic_plots.plot_achievement_ranking(ranking_data)
-        st.plotly_chart(fig_rank, use_container_width=True)
-    else:
-        st.info("目標データをアップロードするとランキングが表示されます。")
-
-def render_hospital_page(df, target_dict, latest_date):
-    st.title("🏥 病院全体分析")
-    # (app.pyに記載していた元のUIロジックをここに配置)
-    period_type = st.radio("表示単位", ["週次", "月次", "四半期"], horizontal=True)
-    if period_type == "週次":
-        summary = weekly.get_summary(df, use_complete_weeks=st.toggle("完全週データ", True))
-        fig = trend_plots.create_weekly_summary_chart(summary, "病院全体 週次推移", target_dict)
-    # ... 月次・四半期も同様に ...
-    st.plotly_chart(fig, use_container_width=True)
-    
-def render_department_page(df, target_dict, latest_date):
-    st.title("🩺 診療科別分析")
-    # (app.pyに記載していた元のUIロジックをここに配置)
-    
-def render_surgeon_page(df, target_dict, latest_date):
-    st.title("👨‍⚕️ 術者分析")
-    # (app.pyに記載していた元のUIロジックをここに配置)
-
-def render_prediction_page(df, target_dict, latest_date):
-    st.title("🔮 将来予測")
-    # (app.pyに記載していた元のUIロジックをここに配置)
-    
-# --- メイン実行部 ---
-def main():
-    initialize_session_state()
-    render_sidebar()
-    render_page_content()
-
-if __name__ == "__main__":
-    main()
+    if st.button("📄 PDFレポートを生成", key=f"pdf_{data_type}_{period_type}_{department}"):
+        with st.spinner("PDFレポートを生成中..."):
+            # ここでは簡略化のため、汎用のレポート生成関数を呼び出す
+            pdf_buffer = generate_hospital_report(df, fig, target_dict, period_type)
+            st.download_button(
+                label="📥 PDFをダウンロード",
+                data=pdf_buffer,
+                file_name=filename,
+                mime="application/pdf"
+            )

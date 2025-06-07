@@ -1,6 +1,22 @@
 # config/style_config.py
 import pandas as pd
 import plotly.io as pio
+import streamlit as st
+
+def load_dashboard_css():
+    """ダッシュボード用のカスタムCSSを読み込み"""
+    st.markdown("""
+    <style>
+        /* メインコンテナのスタイルなど */
+        .main .block-container {
+            padding: 1rem 2rem;
+        }
+        .stAlert > div {
+            border-radius: 10px;
+        }
+        /* 必要に応じて他のスタイルを追加 */
+    </style>
+    """, unsafe_allow_html=True)
 
 # Plotlyグラフのテンプレート設定
 PLOT_TEMPLATE = "plotly_white"
