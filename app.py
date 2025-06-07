@@ -1264,12 +1264,23 @@ def main():
         else:
             st.warning("データをアップロードしてください。")
     elif current_view == 'surgeon':
-        # 術者分析機能
+        # 術者分析機能（改良版）
         st.header("👨‍⚕️ 術者分析")
         if st.session_state.get('df_gas') is not None:
             df_gas = st.session_state['df_gas']
             target_dict = st.session_state.get('target_dict', {})
-            create_surgeon_analysis(df_gas, target_dict)
+            
+            # 分析タイプを選択
+            analysis_mode = st.radio(
+                "分析モード選択",
+                ["📊 総合術者ランキング", "🔍 従来の術者分析"],
+                horizontal=True
+            )
+            
+            if analysis_mode == "📊 総合術者ランキング":
+                create_comprehensive_surgeon_analysis(df_gas, target_dict)
+            else:
+                create_surgeon_analysis(df_gas, target_dict)
         else:
             st.warning("データをアップロードしてください。")
     elif current_view == 'prediction':
@@ -1285,4 +1296,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
