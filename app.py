@@ -4,10 +4,27 @@ import traceback
 import pandas as pd
 import numpy as np
 
-from config.app_config import config, CUSTOM_CSS, PAGE_CONFIG
-from utils.session_manager import SessionManager
-from components.kpi_cards import render_kpi_dashboard, create_summary_kpis
+try:
+    from config.app_config import config, CUSTOM_CSS, PAGE_CONFIG
+    CONFIG_LOADED = True
+except ImportError as e:
+    st.error(f"設定モジュールの読み込みエラー: {e}")
+    CONFIG_LOADED = False
 
+try:
+    from utils.session_manager import SessionManager
+    SESSION_MANAGER_LOADED = True
+except ImportError as e:
+    st.error(f"セッション管理モジュールの読み込みエラー: {e}")
+    SESSION_MANAGER_LOADED = False
+
+try:
+    from components.kpi_cards import render_kpi_dashboard, create_summary_kpis
+    KPI_CARDS_LOADED = True
+except ImportError as e:
+    st.error(f"KPIカードモジュールの読み込みエラー: {e}")
+    KPI_CARDS_LOADED = False
+    
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
@@ -38,7 +55,6 @@ except Exception as e:
 
 # ページ設定
 st.set_page_config(**PAGE_CONFIG)
-)
 
 # カスタムCSS（外部化）
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
