@@ -3,6 +3,11 @@ import streamlit as st
 import traceback
 import pandas as pd
 import numpy as np
+
+from config.app_config import config, CUSTOM_CSS, PAGE_CONFIG
+from utils.session_manager import SessionManager
+from components.kpi_cards import render_kpi_dashboard, create_summary_kpis
+
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
@@ -32,123 +37,11 @@ except Exception as e:
     COMPLETE_WEEKS_LOADED = False
 
 # ページ設定
-st.set_page_config(
-    page_title="🏥 手術分析ダッシュボード",
-    page_icon="🏥",
-    layout="wide",
-    initial_sidebar_state="expanded"
+st.set_page_config(**PAGE_CONFIG)
 )
 
-# カスタムCSS
-st.markdown("""
-<style>
-    /* メインコンテナ */
-    .main-header {
-        background: linear-gradient(90deg, #1f77b4 0%, #2ca02c 100%);
-        padding: 2rem 0;
-        color: white;
-        text-align: center;
-        margin-bottom: 2rem;
-        border-radius: 10px;
-    }
-    
-    /* KPIカード */
-    .kpi-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        border: 1px solid #e0e0e0;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-        height: 180px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-    }
-    
-    .kpi-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-    }
-    
-    .kpi-value {
-        font-size: 2.5rem;
-        font-weight: bold;
-        margin: 0.5rem 0;
-        color: #1f77b4;
-    }
-    
-    .kpi-label {
-        font-size: 1rem;
-        color: #666;
-        margin-bottom: 0.5rem;
-    }
-    
-    .kpi-change {
-        font-size: 0.9rem;
-        margin-top: 0.5rem;
-    }
-    
-    .positive { color: #2ca02c; }
-    .negative { color: #d62728; }
-    .neutral { color: #ff7f0e; }
-    
-    /* フィルタセクション */
-    .filter-section {
-        background: #f8f9fa;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-        border: 1px solid #e9ecef;
-    }
-    
-    /* チャートコンテナ */
-    .chart-container {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 15px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        border: 1px solid #e0e0e0;
-        margin-bottom: 1.5rem;
-    }
-    
-    /* ダッシュボード タイトル */
-    .dashboard-title {
-        font-size: 2.5rem;
-        color: white;
-        font-weight: bold;
-        margin: 0;
-    }
-    
-    .dashboard-subtitle {
-        font-size: 1.2rem;
-        color: rgba(255, 255, 255, 0.8);
-        margin-top: 0.5rem;
-    }
-    
-    /* ナビゲーション */
-    .nav-pill {
-        background: #e3f2fd;
-        color: #1976d2;
-        padding: 0.5rem 1rem;
-        border-radius: 25px;
-        margin: 0.25rem;
-        border: none;
-        cursor: pointer;
-        transition: all 0.3s ease;
-    }
-    
-    .nav-pill:hover {
-        background: #1976d2;
-        color: white;
-    }
-    
-    .nav-pill.active {
-        background: #1976d2;
-        color: white;
-    }
-</style>
-""", unsafe_allow_html=True)
+# カスタムCSS（外部化）
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 # モジュールインポート（エラーハンドリング付き）
 try:
@@ -170,15 +63,8 @@ except Exception as e:
 
 # セッション状態の初期化
 def initialize_session_state():
-    """セッション状態を初期化"""
-    if 'df_gas' not in st.session_state:
-        st.session_state['df_gas'] = None
-    if 'target_dict' not in st.session_state:
-        st.session_state['target_dict'] = {}
-    if 'latest_date' not in st.session_state:
-        st.session_state['latest_date'] = None
-    if 'current_view' not in st.session_state:
-        st.session_state['current_view'] = 'dashboard'
+    """セッション状態を初期化（新版）"""
+    SessionManager.init_session_state()
 
 def split_surgeon_names_by_newline(name_string):
     """改行コードで術者名を分割する関数"""

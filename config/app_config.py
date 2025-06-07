@@ -1,4 +1,5 @@
 # config/app_config.py - 設定管理モジュール
+# 既存のapp.pyから設定を外部化
 from dataclasses import dataclass
 from typing import Dict, List
 
