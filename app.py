@@ -1,8 +1,18 @@
 # app_dashboard.py - 改修版ダッシュボード形式手術分析アプリ（改行コード対応版）
 import streamlit as st
+
+# ページ設定
+st.set_page_config(
+    page_title="🏥 手術分析ダッシュボード",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 import traceback
 import pandas as pd
 import numpy as np
+import io
 
 try:
     from config.app_config import config, CUSTOM_CSS, PAGE_CONFIG
@@ -53,8 +63,6 @@ except Exception as e:
     st.error(f"完全週データ分析モジュールの読み込みエラー: {e}")
     COMPLETE_WEEKS_LOADED = False
 
-# ページ設定
-st.set_page_config(**PAGE_CONFIG)
 
 # カスタムCSS（外部化）
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)

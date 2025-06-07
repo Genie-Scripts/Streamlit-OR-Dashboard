@@ -435,3 +435,156 @@ def render_summary_kpis(data: pd.DataFrame):
     ]
     
     kpi.render_kpi_grid(summary_kpis, columns=4)
+
+def render_kpi_dashboard(data: pd.DataFrame, selected_columns: List[str] = None):
+    """
+    KPIダッシュボード全体を表示
+    
+    Args:
+        data: 表示するデータフレーム
+        selected_columns: 選択された列のリスト
+    """
+    if data is None or data.empty:
+        st.warning("表示するデータがありません。")
+        return
+    
+    # 数値列を自動検出
+    numeric_columns = data.select_dtypes(include=[np.number]).columns.tolist()
+    
+    if selected_columns:
+        numeric_columns = [col for col in selected_columns if col in numeric_columns]
+    
+    # セクション1: サマリーKPI
+    st.markdown("### 📊 データサマリー")
+    render_summary_kpis(data)
+    
+    st.markdown("---")
+    
+    # セクション2: 数値列の基本KPI
+    if numeric_columns:
+        st.markdown("### 📈 数値データKPI")
+        render_basic_kpis(data, numeric_columns[:4])  # 最大4列まで表示
+        
+        st.markdown("---")
+        
+        # セクション3: 詳細統計
+        st.markdown("### 📋 詳細統計")
+        
+        col1, col2 = st.columns(2)
+        
+        for i, col in enumerate(numeric_columns[:2]):  # 最初の2列について詳細表示
+            with col1 if i == 0 else col2:
+                kpi = KPICard()
+                kpi.render_distribution_kpi(data[col], title=f"{col} 分布")
+    
+    # セクション4: 日付列があればトレンド表示
+    date_columns = data.select_dtypes(include=['datetime64', 'object']).columns
+    date_column = None
+    
+    for col in date_columns:
+        try:
+            pd.to_datetime(data[col])
+            date_column = col
+            break
+        except:
+            continue
+    
+    if date_column and numeric_columns:
+        st.markdown("---")
+        st.markdown("### 📅 時系列トレンド")
+        
+        # 最初の数値列について時系列表示
+        kpi = KPICard()
+        kpi.render_time_series_kpi(
+            data, 
+            date_column, 
+            numeric_columns[0], 
+            title=f"{numeric_columns[0]} トレンド"
+        )
+
+def render_medical_kpis(data: pd.DataFrame):
+    """
+    医療データ専用のKPI表示
+    
+    Args:
+        data: 医療データフレーム
+    """
+    kpi = KPICard()
+    
+    # 手術関連のKPI
+    surgery_kpis = []
+    
+    # 患者数
+    if 'patient_id' in data.columns or 'Patient_ID' in data.columns:
+        patient_col = 'patient_id' if 'patient_id' in data.columns else 'Patient_ID'
+        unique_patients = data[patient_col].nunique()
+        surgery_kpis.append({
+            "title": "総患者数",
+            "value": unique_patients,
+            "suffix": " 名"
+        })
+    
+    # 手術件数
+    surgery_count = len(data)
+    surgery_kpis.append({
+        "title": "手術件数",
+        "value": surgery_count,
+        "suffix": " 件"
+    })
+    
+    # 入院日数関連
+    if 'length_of_stay' in data.columns or 'Length_of_Stay' in data.columns:
+        los_col = 'length_of_stay' if 'length_of_stay' in data.columns else 'Length_of_Stay'
+        avg_los = data[los_col].mean()
+        total_los = data[los_col].sum()
+        
+        surgery_kpis.extend([
+            {
+                "title": "平均入院日数",
+                "value": avg_los,
+                "suffix": " 日",
+                "format_value": True
+            },
+            {
+                "title": "総入院日数",
+                "value": total_los,
+                "suffix": " 日"
+            }
+        ])
+    
+    # 費用関連
+    cost_columns = [col for col in data.columns if 'cost' in col.lower() or 'charge' in col.lower()]
+    if cost_columns:
+        total_cost = data[cost_columns[0]].sum()
+        avg_cost = data[cost_columns[0]].mean()
+        
+        surgery_kpis.extend([
+            {
+                "title": "総医療費",
+                "value": total_cost,
+                "prefix": "¥",
+                "format_value": True
+            },
+            {
+                "title": "平均医療費",
+                "value": avg_cost,
+                "prefix": "¥",
+                "format_value": True
+            }
+        ])
+    
+    # KPI表示
+    if surgery_kpis:
+        st.markdown("### 🏥 医療KPI")
+        kpi.render_kpi_grid(surgery_kpis, columns=4)
+    
+    # 診療科別分析
+    dept_columns = [col for col in data.columns if 'department' in col.lower() or 'specialty' in col.lower()]
+    if dept_columns:
+        st.markdown("---")
+        kpi.render_category_kpi_grid(
+            data, 
+            dept_columns[0], 
+            cost_columns[0] if cost_columns else surgery_count,
+            title="診療科別分析"
+        )
