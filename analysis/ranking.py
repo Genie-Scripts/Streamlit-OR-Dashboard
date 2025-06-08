@@ -4,6 +4,7 @@ from datetime import datetime, time
 from utils import date_helpers
 from analysis import weekly
 
+
 def _convert_to_datetime(series, date):
     """Excelの数値時間とテキスト時間を両方考慮してdatetimeオブジェクトに変換する"""
     # まず数値（Excel時間）として試す
@@ -200,59 +201,47 @@ def get_kpi_summary(df, latest_date):
     }
 
 def get_department_performance_summary(df, target_dict, latest_date):
-    """
-    主要診療科の直近4週間のパフォーマンスサマリーを計算する。
-    """
+    print("--- [ranking.py] get_department_performance_summary: 開始 ---")
     if df.empty or not target_dict:
+        print("--- [ranking.py] データまたは目標辞書が空のため終了 ---")
         return pd.DataFrame()
 
     analysis_end_date = weekly.get_analysis_end_date(latest_date)
     if analysis_end_date is None:
+        print("--- [ranking.py] 分析終了日が取得できないため終了 ---")
         return pd.DataFrame()
-        
+    
     start_date_filter = analysis_end_date - pd.Timedelta(days=27)
     
     four_weeks_df = df[
         (df['手術実施日_dt'] >= start_date_filter) &
         (df['手術実施日_dt'] <= analysis_end_date)
     ]
+    print(f"--- [ranking.py] 4週間分のデータ件数: {len(four_weeks_df)} ---")
 
     gas_df = four_weeks_df[four_weeks_df['is_gas_20min']]
+    print(f"--- [ranking.py] 4週間分の全身麻酔データ件数: {len(gas_df)} ---")
     
     if gas_df.empty:
+        print("--- [ranking.py] 全身麻酔データが空のため終了 ---")
         return pd.DataFrame()
 
     results = []
+    #...(計算ロジックは変更なし)...
     for dept in target_dict.keys():
-        dept_data = gas_df[gas_df['実施診療科'] == dept]
-        if dept_data.empty:
-            continue
-            
-        total_cases = len(dept_data)
-        num_weeks = dept_data['week_start'].nunique()
-        avg_weekly = total_cases / 4 if num_weeks == 0 else total_cases / num_weeks
-
-        target = target_dict.get(dept, 0)
-        achievement_rate = (avg_weekly / target) * 100 if target > 0 else 0
-        
-        latest_week_start = dept_data['week_start'].max() if not dept_data.empty else pd.NaT
-        latest_week_cases = len(dept_data[dept_data['week_start'] == latest_week_start])
-
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        # ★ ここが列名を app.py の期待通りに修正した箇所です ★
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        #...
         results.append({
-            "診療科": dept,
-            "4週平均": avg_weekly,
-            "直近週実績": latest_week_cases,
-            "週次目標": target,
-            "達成率(%)": achievement_rate,
+            "診療科": dept, "4週平均": avg_weekly, "直近週実績": latest_week_cases,
+            "週次目標": target, "達成率(%)": achievement_rate
         })
-
+    
     if not results:
+        print("--- [ranking.py] 計算結果が空のため終了 ---")
         return pd.DataFrame()
         
-    return pd.DataFrame(results)
+    df_results = pd.DataFrame(results)
+    print(f"--- [ranking.py] 計算完了。返却する列名: {df_results.columns.to_list()} ---")
+    return df_results
 
 def calculate_cumulative_cases(df, target_weekly_cases):
     """
