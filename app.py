@@ -1,3 +1,4 @@
+# app.py (v5.5 最終完成版)
 import streamlit as st
 import pandas as pd
 import traceback
@@ -5,7 +6,6 @@ from datetime import datetime, time
 import pytz
 import plotly.express as px
 
-st.write("--- app.py: モジュールインポート開始 ---")
 # --- 整理されたモジュールのインポート ---
 from config import style_config, target_loader
 from data_processing import loader
@@ -13,46 +13,23 @@ from analysis import weekly, periodic, ranking, surgeon, forecasting
 from plotting import trend_plots, generic_plots
 from reporting import csv_exporter, pdf_exporter
 from utils import date_helpers
-st.write("--- app.py: モジュールインポート完了 ---")
 
-
-# --- ページ設定とCSS (最初に一度だけ) ---
+# --- ページ設定 (必ず最初に実行) ---
 st.set_page_config(
     page_title="手術分析ダッシュボード", page_icon="🏥", layout="wide", initial_sidebar_state="expanded"
 )
 style_config.load_dashboard_css()
-st.write("--- app.py: ページ設定完了 ---")
-
 
 # --- セッション状態の初期化 ---
 def initialize_session_state():
-    st.write("--- initialize_session_state() 開始 ---")
     if 'processed_df' not in st.session_state: st.session_state['processed_df'] = pd.DataFrame()
     if 'target_dict' not in st.session_state: st.session_state['target_dict'] = {}
     if 'latest_date' not in st.session_state: st.session_state['latest_date'] = None
     if 'current_view' not in st.session_state: st.session_state['current_view'] = 'ダッシュボード'
 
-def _debug_convert_to_datetime(series, date):
-    """[デバッグ用] Excelの数値時間とテキスト時間を両方考慮してdatetimeオブジェクトに変換する"""
-    try:
-        # まず数値（Excel時間）として試す
-        numeric_series = pd.to_numeric(series, errors='coerce')
-        if numeric_series.notna().sum() / len(series.dropna()) > 0.8:
-            time_deltas = pd.to_timedelta(numeric_series * 24, unit='h', errors='coerce')
-            return pd.to_datetime(date) + time_deltas
-        
-        # テキスト時間として処理
-        time_series = pd.to_datetime(series, errors='coerce', format=None).dt.time
-        return pd.Series([datetime.combine(d, t) if pd.notna(d) and pd.notna(t) else pd.NaT 
-                          for d, t in zip(date, time_series)], index=series.index)
-    except Exception as e:
-        return f"変換エラー: {e}"
-        
 # --- UI描画関数 ---
 def render_sidebar():
-    st.write("--- render_sidebar() 開始 ---")
     with st.sidebar:
-        # ... (サイドバーのコードは変更なし) ...
         st.title("🏥 手術分析")
         st.markdown("---")
         views = ["ダッシュボード", "データアップロード", "病院全体分析", "診療科別分析", "術者分析", "将来予測"]
@@ -66,34 +43,30 @@ def render_sidebar():
         if st.session_state.get('target_dict'): st.success("🎯 目標データ設定済み")
         else: st.info("目標データ未設定")
         st.markdown("---")
-        st.info("Version: 5.5 (Debug)")
+        st.info("Version: 5.5 (Final)")
+        jst = pytz.timezone('Asia/Tokyo')
+        st.write(f"現在時刻: {datetime.now(jst).strftime('%H:%M:%S')}")
 
 def render_page_content():
     current_view = st.session_state.get('current_view', 'ダッシュボード')
-    st.write(f"--- render_page_content() 開始 (表示ページ: {current_view}) ---")
-
     if current_view == 'データアップロード':
         render_upload_page()
         return
-        
     df = st.session_state.get('processed_df')
     if df is None or df.empty:
         st.warning("分析を開始するには、「データアップロード」ページでデータを読み込んでください。")
         return
-        
     target_dict = st.session_state.get('target_dict', {})
     latest_date = st.session_state.get('latest_date')
-    
     page_map = {
+        "ダッシュボード": render_dashboard_page,
         "病院全体分析": render_hospital_page,
-        # ... 他のページも同様 ...
+        "診療科別分析": render_department_page,
+        "術者分析": render_surgeon_page,
+        "将来予測": render_prediction_page,
     }
     page_func = page_map.get(current_view)
-    st.write(f"--- ページ '{current_view}' の描画関数を呼び出します ---")
-    if page_func:
-        page_func(df, target_dict, latest_date)
-    else:
-        st.error(f"ページ '{current_view}' の描画関数が見つかりません。")
+    if page_func: page_func(df, target_dict, latest_date)
 
 def render_upload_page():
     st.header("📤 データアップロード")
@@ -133,32 +106,76 @@ def render_dashboard_page(df, target_dict, latest_date):
             st.plotly_chart(fig_rank, use_container_width=True)
     else: st.info("目標データをアップロードするとランキングが表示されます。")
 
-def render_page_content():
-    current_view = st.session_state.get('current_view', 'ダッシュボード')
-    st.write(f"--- render_page_content() 開始 (表示ページ: {current_view}) ---")
-
-    if current_view == 'データアップロード':
-        render_upload_page()
-        return
-        
-    df = st.session_state.get('processed_df')
-    if df is None or df.empty:
-        st.warning("分析を開始するには、「データアップロード」ページでデータを読み込んでください。")
-        return
-        
-    target_dict = st.session_state.get('target_dict', {})
-    latest_date = st.session_state.get('latest_date')
+def render_hospital_page(df, target_dict, latest_date):
+    st.title("🏥 病院全体分析 (完全週データ)")
     
-    page_map = {
-        "病院全体分析": render_hospital_page,
-        # ... 他のページも同様 ...
-    }
-    page_func = page_map.get(current_view)
-    st.write(f"--- ページ '{current_view}' の描画関数を呼び出します ---")
-    if page_func:
-        page_func(df, target_dict, latest_date)
+    analysis_end_sunday = weekly.get_analysis_end_date(latest_date)
+    if analysis_end_sunday is None:
+        st.warning("分析可能な日付データがありません。"); return
+        
+    excluded_days = (latest_date - analysis_end_sunday).days
+    df_complete_weeks = df[df['手術実施日_dt'] <= analysis_end_sunday]
+    total_records = len(df_complete_weeks)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: st.metric("📊 総レコード数", f"{total_records:,}件")
+    with col2: st.metric("📅 最新データ日", latest_date.strftime('%Y/%m/%d'))
+    with col3: st.metric("🎯 分析終了日", analysis_end_sunday.strftime('%Y/%m/%d'))
+    with col4: st.metric("⚠️ 除外日数", f"{excluded_days}日")
+    
+    st.caption(f"💡 最新データが{latest_date.strftime('%A')}のため、分析精度向上のため前の日曜日({analysis_end_sunday.strftime('%Y/%m/%d')})までを分析対象としています。")
+    st.markdown("---")
+    
+    st.subheader("📊 診療科別パフォーマンスダッシュボード（直近4週データ分析）")
+    four_weeks_ago = analysis_end_sunday - pd.Timedelta(days=27)
+    st.caption(f"🗓️ 分析対象期間: {four_weeks_ago.strftime('%Y/%m/%d')} ~ {analysis_end_sunday.strftime('%Y/%m/%d')}")
+
+    perf_summary = ranking.get_department_performance_summary(df, target_dict, latest_date)
+
+    if not perf_summary.empty:
+        if '達成率(%)' not in perf_summary.columns:
+            st.warning("パフォーマンスデータに達成率の列が見つかりません。")
+        else:
+            sorted_perf = perf_summary.sort_values("達成率(%)", ascending=False)
+            
+            def get_color_for_rate(rate):
+                if rate >= 100: return "#28a745"
+                if rate >= 80: return "#ffc107"
+                return "#dc3545"
+
+            cols = st.columns(3)
+            for i, row in sorted_perf.iterrows():
+                with cols[i % 3]:
+                    rate = row["達成率(%)"]
+                    color = get_color_for_rate(rate)
+                    bar_width = min(rate, 100)
+                    
+                    html = f"""
+                    <div style="background-color: {color}1A; border-left: 5px solid {color}; padding: 12px; border-radius: 5px; margin-bottom: 12px; height: 165px;">
+                        <h5 style="margin: 0 0 10px 0; font-weight: bold; color: #333;">{row["診療科"]}</h5>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9em;"><span>4週平均:</span><span style="font-weight: bold;">{row["4週平均"]:.1f} 件</span></div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9em;"><span>直近週実績:</span><span style="font-weight: bold;">{row["直近週実績"]:.0f} 件</span></div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #666;"><span>目標:</span><span>{row["週次目標"]:.1f} 件</span></div>
+                        <div style="display: flex; justify-content: space-between; font-size: 1.1em; color: {color}; margin-top: 5px;">
+                            <span style="font-weight: bold;">達成率:</span><span style="font-weight: bold;">{rate:.1f}%</span>
+                        </div>
+                        <div style="background-color: #e9ecef; border-radius: 5px; height: 6px; margin-top: 5px;">
+                            <div style="width: {bar_width}%; background-color: {color}; height: 6px; border-radius: 5px;"></div>
+                        </div>
+                    </div>
+                    """
+                    st.markdown(html, unsafe_allow_html=True)
+            
+            with st.expander("詳細データテーブル"): st.dataframe(sorted_perf)
     else:
-        st.error(f"ページ '{current_view}' の描画関数が見つかりません。")
+        st.info("診療科別パフォーマンスを計算する十分なデータがありません。")
+        
+    st.markdown("---")
+    st.subheader("📈 全身麻酔手術件数 週次推移（完全週データ）")
+    summary = weekly.get_summary(df, use_complete_weeks=True)
+    if not summary.empty:
+        fig = trend_plots.create_weekly_summary_chart(summary, "", target_dict)
+        st.plotly_chart(fig, use_container_width=True)
 
 def render_department_page(df, target_dict, latest_date):
     st.title("🩺 診療科別分析")
@@ -166,25 +183,20 @@ def render_department_page(df, target_dict, latest_date):
     if not departments: st.warning("データに診療科情報がありません。"); return
     selected_dept = st.selectbox("分析する診療科を選択", departments)
     dept_df = df[df['実施診療科'] == selected_dept]
-    
     kpi_summary = ranking.get_kpi_summary(dept_df, latest_date)
     generic_plots.display_kpi_metrics(kpi_summary)
     st.markdown("---")
-    
     summary = weekly.get_summary(df, department=selected_dept, use_complete_weeks=st.toggle("完全週データ", True))
     fig = trend_plots.create_weekly_dept_chart(summary, selected_dept, target_dict)
     st.plotly_chart(fig, use_container_width=True)
-    
     st.markdown("---")
     st.header("🔍 詳細分析")
     tab1, tab2, tab3, tab4 = st.tabs(["術者分析", "時間分析", "統計情報", "累積実績"])
-
     with tab1:
         st.subheader(f"{selected_dept} 術者別件数 (Top 15)")
         expanded_df = surgeon.get_expanded_surgeon_df(dept_df)
         surgeon_summary = surgeon.get_surgeon_summary(expanded_df)
         if not surgeon_summary.empty: st.plotly_chart(generic_plots.plot_surgeon_ranking(surgeon_summary, 15, selected_dept), use_container_width=True)
-    
     with tab2:
         st.subheader("曜日・月別 分布")
         gas_df = dept_df[dept_df['is_gas_20min']]
@@ -196,13 +208,10 @@ def render_department_page(df, target_dict, latest_date):
             with col2:
                 month_dist = gas_df['手術実施日_dt'].dt.month_name().value_counts()
                 st.plotly_chart(px.bar(x=month_dist.index, y=month_dist.values, title="月別分布", labels={'x':'月', 'y':'件数'}), use_container_width=True)
-
     with tab3:
         st.subheader("基本統計")
         desc_df = dept_df[dept_df['is_gas_20min']].describe(include='all').transpose()
-        # .astype(str) を追加して、すべてのデータを文字列に変換してから表示する
         st.dataframe(desc_df.astype(str))
-
     with tab4:
         st.subheader(f"{selected_dept} 今年度 累積実績")
         weekly_target = target_dict.get(selected_dept)
@@ -283,12 +292,9 @@ def render_prediction_page(df, target_dict, latest_date):
 
 # --- メイン実行部 ---
 def main():
-    st.write("--- main() 開始 ---")
     initialize_session_state()
     render_sidebar()
     render_page_content()
-    st.write("--- main() 終了 ---")
 
 if __name__ == "__main__":
-    st.write("--- スクリプト実行開始 ---")
     main()
