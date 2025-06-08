@@ -98,13 +98,13 @@ def create_forecast_chart(result_df, title):
     
     fig = go.Figure()
     
-    # データ構造を確認
+    # データ構造を確認して実績・予測を分離
     if '種別' in result_df.columns:
-        # 種別列を使って実績・予測を分離
+        # '種別'列で実績・予測を分離
         actual_df = result_df[result_df['種別'] == '実績'].copy()
         forecast_df = result_df[result_df['種別'] == '予測'].copy()
         
-        # 日付列と値列を特定
+        # 正しい列名を使用
         date_col = 'month_start'
         value_col = '値'
         
@@ -113,23 +113,21 @@ def create_forecast_chart(result_df, title):
             connector = actual_df.tail(1).copy()
             connector['種別'] = '予測'  # 種別を予測に変更
             forecast_df = pd.concat([connector, forecast_df], ignore_index=True)
-        
+            
     elif 'タイプ' in result_df.columns:
-        # タイプ列がある場合の処理（従来の処理）
+        # 'タイプ'列がある場合の処理（レガシー対応）
         actual_df = result_df[result_df['タイプ'] == '実績'].copy()
         forecast_df = result_df[result_df['タイプ'] == '予測'].copy()
         
-        # 列名を推定
-        date_col = '月' if '月' in result_df.columns else result_df.columns[0]
-        value_col = '値' if '値' in result_df.columns else result_df.columns[1]
+        date_col = '月' if '月' in result_df.columns else 'month_start'
+        value_col = '値'
         
     else:
         # 種別列がない場合は、全データを予測として扱う
         actual_df = pd.DataFrame()
         forecast_df = result_df.copy()
         
-        # 列名を推定
-        date_col = result_df.columns[0]
+        date_col = 'month_start' if 'month_start' in result_df.columns else result_df.columns[0]
         value_col = '値' if '値' in result_df.columns else result_df.columns[1]
     
     # 実績データのプロット
