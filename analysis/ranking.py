@@ -293,33 +293,47 @@ def calculate_operating_room_utilization(df, period_df):
 
 def get_kpi_summary(df, latest_date):
     """
-    ダッシュボード用の主要KPIサマリーを計算する。
+    ダッシュボード用の主要KPIサマリーを計算する（完全週単位）
     """
     if df.empty:
         return {}
     
-    # 直近30日のデータを取得
-    recent_df = date_helpers.filter_by_period(df, latest_date, "直近30日")
+    # 分析終了日を前の日曜日に設定（完全週対応）
+    from analysis import weekly
+    analysis_end_date = weekly.get_analysis_end_date(latest_date)
+    
+    if analysis_end_date is None:
+        return {}
+    
+    # 直近4週間のデータを取得（28日 = 4週間）
+    four_weeks_ago = analysis_end_date - pd.Timedelta(days=27)  # 4週間 - 1日
+    recent_df = df[
+        (df['手術実施日_dt'] >= four_weeks_ago) & 
+        (df['手術実施日_dt'] <= analysis_end_date)
+    ]
+    
     gas_df = recent_df[recent_df['is_gas_20min']]
     
     if gas_df.empty:
         return {}
     
-    # 基本統計
+    # 基本統計（完全4週間）
     total_cases = len(gas_df)
-    days_in_period = (gas_df['手術実施日_dt'].max() - gas_df['手術実施日_dt'].min()).days + 1
-    daily_average = total_cases / days_in_period if days_in_period > 0 else 0
+    weeks_in_period = 4  # 完全4週間
+    days_in_period = 28  # 完全4週間
+    daily_average = total_cases / days_in_period
+    weekly_average = total_cases / weeks_in_period
     
     # 平日のみの統計
     weekday_df = gas_df[gas_df['is_weekday']]
-    total_operating_days = weekday_df['手術実施日_dt'].nunique()
-    avg_cases_per_weekday = len(weekday_df) / total_operating_days if total_operating_days > 0 else 0
+    weekdays_in_period = 20  # 4週間 × 5平日
+    avg_cases_per_weekday = len(weekday_df) / weekdays_in_period
     
     # 実際の手術室稼働率を計算
     utilization_rate = calculate_operating_room_utilization(df, recent_df)
     
     return {
-        "総手術件数 (直近30日)": total_cases,
+        "総手術件数 (直近4週)": total_cases,
         "1日あたり平均件数": f"{daily_average:.1f}",
         "平日1日あたり平均件数": f"{avg_cases_per_weekday:.1f}",
         "手術室稼働率": f"{utilization_rate:.1f}%"
