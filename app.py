@@ -42,7 +42,7 @@ def render_sidebar():
         if st.session_state.get('target_dict'): st.success("🎯 目標データ設定済み")
         else: st.info("目標データ未設定")
         st.markdown("---")
-        st.info("Version: 5.2 (Attribute Fix)")
+        st.info("Version: 5.3 (Type Fix)")
         jst = pytz.timezone('Asia/Tokyo')
         st.write(f"現在時刻: {datetime.now(jst).strftime('%H:%M:%S')}")
 
@@ -138,9 +138,6 @@ def render_hospital_page(df, target_dict, latest_date):
                 return "#dc3545"
 
             cols = st.columns(3)
-            # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-            # ★ ここが修正された箇所です ★
-            # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
             for i, row_tuple in enumerate(sorted_perf.itertuples(index=False)):
                 with cols[i % 3]:
                     # itertuplesの行を辞書に変換して、元の列名（文字列）で安全に値を取得
@@ -192,20 +189,25 @@ def render_department_page(df, target_dict, latest_date):
     if not departments: st.warning("データに診療科情報がありません。"); return
     selected_dept = st.selectbox("分析する診療科を選択", departments)
     dept_df = df[df['実施診療科'] == selected_dept]
+    
     kpi_summary = ranking.get_kpi_summary(dept_df, latest_date)
     generic_plots.display_kpi_metrics(kpi_summary)
     st.markdown("---")
+    
     summary = weekly.get_summary(df, department=selected_dept, use_complete_weeks=st.toggle("完全週データ", True))
     fig = trend_plots.create_weekly_dept_chart(summary, selected_dept, target_dict)
     st.plotly_chart(fig, use_container_width=True)
+    
     st.markdown("---")
     st.header("🔍 詳細分析")
     tab1, tab2, tab3, tab4 = st.tabs(["術者分析", "時間分析", "統計情報", "累積実績"])
+
     with tab1:
         st.subheader(f"{selected_dept} 術者別件数 (Top 15)")
         expanded_df = surgeon.get_expanded_surgeon_df(dept_df)
         surgeon_summary = surgeon.get_surgeon_summary(expanded_df)
         if not surgeon_summary.empty: st.plotly_chart(generic_plots.plot_surgeon_ranking(surgeon_summary, 15, selected_dept), use_container_width=True)
+    
     with tab2:
         st.subheader("曜日・月別 分布")
         gas_df = dept_df[dept_df['is_gas_20min']]
@@ -217,8 +219,13 @@ def render_department_page(df, target_dict, latest_date):
             with col2:
                 month_dist = gas_df['手術実施日_dt'].dt.month_name().value_counts()
                 st.plotly_chart(px.bar(x=month_dist.index, y=month_dist.values, title="月別分布", labels={'x':'月', 'y':'件数'}), use_container_width=True)
+
     with tab3:
-        st.dataframe(dept_df[dept_df['is_gas_20min']].describe(include='all').transpose())
+        st.subheader("基本統計")
+        desc_df = dept_df[dept_df['is_gas_20min']].describe(include='all').transpose()
+        # .astype(str) を追加して、すべてのデータを文字列に変換してから表示する
+        st.dataframe(desc_df.astype(str))
+
     with tab4:
         st.subheader(f"{selected_dept} 今年度 累積実績")
         weekly_target = target_dict.get(selected_dept)
