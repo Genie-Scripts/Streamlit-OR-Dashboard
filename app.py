@@ -1,4 +1,4 @@
-# app.py (v4.4 Final)
+# app.py (v4.5 デザイン修正版)
 import streamlit as st
 import pandas as pd
 import traceback
@@ -43,7 +43,7 @@ def render_sidebar():
         if st.session_state.get('target_dict'): st.success("🎯 目標データ設定済み")
         else: st.info("目標データ未設定")
         st.markdown("---")
-        st.info("Version: 4.4 (Final)")
+        st.info("Version: 4.5 (Design Update)")
         jst = pytz.timezone('Asia/Tokyo')
         st.write(f"現在時刻: {datetime.now(jst).strftime('%H:%M:%S')}")
 
@@ -59,11 +59,8 @@ def render_page_content():
     target_dict = st.session_state.get('target_dict', {})
     latest_date = st.session_state.get('latest_date')
     page_map = {
-        "ダッシュボード": render_dashboard_page,
-        "病院全体分析": render_hospital_page,
-        "診療科別分析": render_department_page,
-        "術者分析": render_surgeon_page, # ← この関数の定義を追加
-        "将来予測": render_prediction_page, # ← この関数の定義を追加
+        "ダッシュボード": render_dashboard_page, "病院全体分析": render_hospital_page, "診療科別分析": render_department_page,
+        "術者分析": render_surgeon_page, "将来予測": render_prediction_page,
     }
     page_func = page_map.get(current_view)
     if page_func: page_func(df, target_dict, latest_date)
@@ -106,24 +103,69 @@ def render_dashboard_page(df, target_dict, latest_date):
             st.plotly_chart(fig_rank, use_container_width=True)
     else: st.info("目標データをアップロードするとランキングが表示されます。")
 
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★ ここが修正された関数です ★
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 def render_hospital_page(df, target_dict, latest_date):
+    """病院全体分析ページ (診療科ダッシュボードのデザインを修正)"""
     st.title("🏥 病院全体分析")
-    st.subheader("📊 診療科別パフォーマンスダッシュボード (直近4週)")
+
+    st.subheader("📊 診療科別パフォーマンスダッシュボード (直近4週データ分析)")
     perf_summary = ranking.get_department_performance_summary(df, target_dict, latest_date)
+
     if not perf_summary.empty:
+        # 達成率に応じて色を決定するヘルパー関数
+        def get_color_for_rate(rate):
+            if rate >= 100:
+                return "#28a745"  # Green
+            elif rate >= 80:
+                return "#ffc107"  # Yellow/Orange
+            else:
+                return "#dc3545"  # Red
+
         # 3列で表示
         cols = st.columns(3)
-        # 達成率上位12科に絞ってメトリック表示
-        for i, row in perf_summary.head(12).iterrows():
+        # 達成率でソートされたデータを使用
+        for i, row in perf_summary.iterrows():
             col_index = i % 3
             with cols[col_index]:
-                delta_val = row['達成率(%)'] - 100
-                st.metric(label=f"🏥 {row['診療科']}", value=f"{row['4週平均']:.1f} 件/週", delta=f"{delta_val:.1f}% vs 目標", delta_color="normal")
-        with st.expander("全診療科のパフォーマンス詳細"): st.dataframe(perf_summary)
-    else: st.info("診療科別パフォーマンスを計算する十分なデータがありません。")
+                rate = row['達成率(%)']
+                color = get_color_for_rate(rate)
+                bar_width = min(rate, 100) # プログレスバーの最大幅は100%
+
+                # カスタムHTMLでカードを作成
+                html = f"""
+                <div style="border: 1px solid #ddd; border-left: 6px solid {color}; padding: 15px; border-radius: 5px; margin-bottom: 15px; height: 160px;">
+                    <h5 style="margin: 0 0 12px 0; font-weight: bold;">{row['診療科']}</h5>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.9em;">
+                        <span>週平均:</span>
+                        <span style="font-weight: bold;">{row['4週平均']:.1f} 件</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #666;">
+                        <span>目標:</span>
+                        <span>{row['週次目標']:.1f} 件</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 1.1em; color: {color}; margin-top: 8px;">
+                        <span style="font-weight: bold;">達成率:</span>
+                        <span style="font-weight: bold;">{rate:.1f}%</span>
+                    </div>
+                    <div style="background-color: #e9ecef; border-radius: 5px; height: 8px; margin-top: 8px;">
+                        <div style="width: {bar_width}%; background-color: {color}; height: 8px; border-radius: 5px;"></div>
+                    </div>
+                </div>
+                """
+                st.markdown(html, unsafe_allow_html=True)
+        
+        with st.expander("詳細データテーブル"):
+            st.dataframe(perf_summary)
+    else:
+        st.info("診療科別パフォーマンスを計算する十分なデータがありません。")
+
     st.markdown("---")
     st.subheader("📈 全体トレンド分析")
     period_type = st.radio("表示単位", ["週次", "月次", "四半期"], horizontal=True, key="hospital_period")
+    summary = pd.DataFrame()
+    fig = None
     if period_type == "週次":
         use_complete = st.toggle("完全週データで分析", True)
         summary = weekly.get_summary(df, use_complete_weeks=use_complete)
@@ -134,9 +176,13 @@ def render_hospital_page(df, target_dict, latest_date):
     else:
         summary = periodic.get_quarterly_summary(df)
         if not summary.empty: fig = trend_plots.create_quarterly_summary_chart(summary, "病院全体 四半期推移", target_dict)
-    if 'fig' in locals() and fig is not None: st.plotly_chart(fig, use_container_width=True)
+    
+    if fig: st.plotly_chart(fig, use_container_width=True)
+
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 def render_department_page(df, target_dict, latest_date):
+    # (この関数は変更なし)
     st.title("🩺 診療科別分析")
     departments = sorted(df["実施診療科"].dropna().unique())
     if not departments: st.warning("データに診療科情報がありません。"); return
@@ -177,9 +223,8 @@ def render_department_page(df, target_dict, latest_date):
             if not cum_data.empty: st.plotly_chart(generic_plots.plot_cumulative_cases_chart(cum_data, f"{selected_dept} 累積実績"), use_container_width=True)
         else: st.info("この診療科の目標値が設定されていないため、累積目標は表示できません。")
 
-# --- ここからが追加された関数の定義 ---
 def render_surgeon_page(df, target_dict, latest_date):
-    """術者分析ページ（機能復元）"""
+    # (この関数は変更なし)
     st.title("👨‍⚕️ 術者分析")
     analysis_type = st.radio("分析タイプ", ["診療科別ランキング", "術者ごと時系列"], horizontal=True)
     with st.spinner("術者データを準備中..."):
@@ -205,10 +250,9 @@ def render_surgeon_page(df, target_dict, latest_date):
             st.plotly_chart(fig, use_container_width=True)
 
 def render_prediction_page(df, target_dict, latest_date):
-    """将来予測ページ（機能復元）"""
+    # (この関数は変更なし)
     st.title("🔮 将来予測")
     tab1, tab2, tab3 = st.tabs(["将来予測", "モデル検証", "パラメータ最適化"])
-
     with tab1:
         st.header("将来予測")
         pred_target = st.radio("予測対象", ["病院全体", "診療科別"], horizontal=True, key="pred_target")
