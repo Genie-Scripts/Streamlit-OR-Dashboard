@@ -42,7 +42,7 @@ def render_sidebar():
         if st.session_state.get('target_dict'): st.success("🎯 目標データ設定済み")
         else: st.info("目標データ未設定")
         st.markdown("---")
-        st.info("Version: 5.3 (Display Fix)")
+        st.info("Version: 5.4 (Final Fix)")
         jst = pytz.timezone('Asia/Tokyo')
         st.write(f"現在時刻: {datetime.now(jst).strftime('%H:%M:%S')}")
 
@@ -69,7 +69,6 @@ def render_page_content():
 
 def render_upload_page():
     st.header("📤 データアップロード")
-    # ... (変更なし) ...
     base_file = st.file_uploader("基礎データ (CSV)", type="csv")
     update_files = st.file_uploader("追加データ (CSV)", type="csv", accept_multiple_files=True)
     target_file = st.file_uploader("目標データ (CSV)", type="csv")
@@ -145,19 +144,19 @@ def render_hospital_page(df, target_dict, latest_date):
 
             cols = st.columns(3)
             # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-            # ★ ここが修正された箇所です: itertuples() から iterrows() に変更 ★
+            # ★ ここが最終修正箇所です: itertuples() から iterrows() に変更 ★
             # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-            for i, row in enumerate(sorted_perf.itertuples()):
+            for i, row in sorted_perf.iterrows(): # iterrows() を使用
                 with cols[i % 3]:
-                    # 各列の値を安全に取得
-                    rate = getattr(row, rate_col_name.replace('%','').replace('(','').replace(')',''), 0)
+                    # 各列の値を元の列名（文字列）で安全に取得
+                    rate = row[rate_col_name]
                     color = get_color_for_rate(rate)
                     bar_width = min(rate, 100)
                     
-                    dept_name = getattr(row, "診療科", "N/A")
-                    avg_4_weeks = getattr(row, "4週平均", 0)
-                    latest_cases = getattr(row, "直近週実績", 0)
-                    target_val = getattr(row, "週次目標", 0)
+                    dept_name = row["診療科"]
+                    avg_4_weeks = row["4週平均"]
+                    latest_cases = row["直近週実績"]
+                    target_val = row["週次目標"]
 
                     html = f"""
                     <div style="background-color: {color}1A; border-left: 5px solid {color}; padding: 12px; border-radius: 5px; margin-bottom: 12px; height: 165px;">
