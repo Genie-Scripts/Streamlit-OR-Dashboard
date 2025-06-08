@@ -1,4 +1,4 @@
-# analysis/ranking.py (列名修正版)
+# analysis/ranking.py (最終修正版)
 import pandas as pd
 import numpy as np
 from utils import date_helpers
@@ -112,14 +112,14 @@ def get_department_performance_summary(df, target_dict, latest_date):
         latest_week_cases = len(dept_data[dept_data['week_start'] == latest_week_start])
 
         # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        # ★ ここが修正された箇所です ★
+        # ★ ここが列名を app.py の期待通りに修正した箇所です ★
         # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         results.append({
             "診療科": dept,
             "4週平均": avg_weekly,
             "直近週実績": latest_week_cases,
             "週次目標": target,
-            "達成率(%)": achievement_rate, # 「達成率」から「達成率(%)」に変更
+            "達成率(%)": achievement_rate,
         })
 
     if not results:
