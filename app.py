@@ -230,7 +230,7 @@ def render_department_page(df, target_dict, latest_date):
 
     with tab3:
         st.subheader("基本統計")
-        st.dataframe(dept_df[dept_df['is_gas_20min']].describe(include='all', datetime_is_numeric=True).transpose())
+        st.dataframe(dept_df[dept_df['is_gas_20min']].describe(include='all').transpose())
 
 def render_surgeon_page(df, target_dict, latest_date):
     """術者分析ページ（機能復元）"""
