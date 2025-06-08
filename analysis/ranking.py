@@ -2,32 +2,28 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, time
 import re
-import unicodedata # 全角・半角の変換に必要
+import unicodedata
 from utils import date_helpers
 from analysis import weekly
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★ ここが最終修正箇所です: 全角を半角に変換する処理を追加 ★
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 def _normalize_room_name(series):
     """手術室名の表記を正規化（全角→半角、数字抽出、'OR'付与）する、最も堅牢な方法"""
     if not pd.api.types.is_string_dtype(series):
         series = series.astype(str)
     
-    # ステップ1: 全角文字を半角に変換 (NFKCという方式で統一)
+    # ステップ1: 全角文字を半角に変換 (NFKC: Compatibility form)
     # これにより "ＯＰ－１２" -> "OP-12" のように変換される
     try:
-        half_width_series = series.apply(lambda x: unicodedata.normalize('NFKC', x) if isinstance(x, str) else "")
+        half_width_series = series.apply(lambda x: unicodedata.normalize('NFKC', str(x)))
     except TypeError:
         half_width_series = series
 
-    # ステップ2: 数字部分のみを抽出
-    # 'OP-12' -> '12', 'OR 2' -> '2', '手術室3' -> '3'
-    # 見つからない場合は NaN になる
+    # ステップ2: 数字部分のみを抽出 (正規表現)
+    # 'OP-12' -> '12', 'OR 2' -> '2'
     extracted_numbers = half_width_series.str.extract(r'(\d+)', expand=False)
 
     # ステップ3: 'OR'を先頭に付与 (数字が抽出できたもののみ)
-    # dropna()で数字がなかった行（例：「外手セ」）を除外してから処理
+    # dropna()で数字がなかった行（例：「外手セ」）は無視される
     return 'OR' + extracted_numbers.dropna()
 
 
@@ -35,7 +31,6 @@ def _convert_to_datetime(series, date_series):
     """Excelの数値時間とテキスト時間を両方考慮してdatetimeオブジェクトに変換する"""
     try:
         numeric_series = pd.to_numeric(series, errors='coerce')
-        # dropna()の前にあるseriesの長さを確認
         if not series.dropna().empty and numeric_series.notna().sum() / len(series.dropna()) > 0.8:
             time_deltas = pd.to_timedelta(numeric_series * 24, unit='h', errors='coerce')
             return pd.to_datetime(date_series.astype(str)) + time_deltas
@@ -76,10 +71,8 @@ def calculate_operating_room_utilization(df, period_df):
         try:
             target_rooms = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
             
-            # 修正された正規化関数を適用
             normalized_room_series = _normalize_room_name(weekday_df[room_col])
             
-            # isin()の前に、比較対象のシリーズもNone/NaNを除外
             valid_normalized_rooms = normalized_room_series.dropna()
             filtered_weekday_df = weekday_df.loc[valid_normalized_rooms.index][valid_normalized_rooms.isin(target_rooms)].copy()
 
@@ -122,7 +115,7 @@ def calculate_operating_room_utilization(df, period_df):
     target_rooms_fallback = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
     if room_col in weekday_df.columns:
         normalized_room_fallback = _normalize_room_name(weekday_df[room_col])
-        weekday_df = weekday_df[normalized_room_fallback.isin(target_rooms_fallback)]
+        weekday_df = weekday_df.loc[normalized_room_fallback.dropna().index][normalized_room_fallback.dropna().isin(target_rooms_fallback)]
         
     total_weekday_cases = len(weekday_df)
     
@@ -161,7 +154,6 @@ def get_kpi_summary(df, latest_date):
         "平日1日あたり平均件数": f"{avg_cases_per_weekday:.1f}",
         "手術室稼働率": f"{utilization_rate:.1f}%"
     }
-
 
 def get_department_performance_summary(df, target_dict, latest_date):
     if df.empty or not target_dict: return pd.DataFrame()
