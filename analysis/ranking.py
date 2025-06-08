@@ -41,8 +41,7 @@ def _normalize_room_name(series):
             # その他の手術室（心カテ、外手セ、アンギオ室など）は除外
             return None
             
-        except Exception as e:
-            print(f"手術室名正規化エラー: {name} -> {str(e)}")
+        except Exception:
             return None
     
     return series.apply(normalize_single_name)
@@ -109,8 +108,7 @@ def _convert_to_datetime(time_series, date_series):
                 continue
                 
         return result
-    except Exception as e:
-        print(f"時刻変換エラー: {str(e)}")
+    except Exception:
         return pd.Series(pd.NaT, index=time_series.index)
 
 def calculate_operating_room_utilization(df, period_df):
@@ -124,24 +122,18 @@ def calculate_operating_room_utilization(df, period_df):
     """
     try:
         if df.empty or period_df.empty:
-            print("データが空です")
             return 0.0
             
         # 平日のみを対象とする
         if 'is_weekday' not in period_df.columns:
-            print("is_weekday列がありません")
             return 0.0
             
         weekday_df = period_df[period_df['is_weekday']].copy()
         if weekday_df.empty:
-            print("平日データがありません")
             return 0.0
-        
-        print(f"対象データ数（平日のみ）: {len(weekday_df)}")
         
         # 列名の特定（実際の列名を使用）
         columns = list(weekday_df.columns)
-        print(f"利用可能な列: {columns}")
         
         # 実施手術室の列を特定
         room_col = None
@@ -172,43 +164,20 @@ def calculate_operating_room_utilization(df, period_df):
         if not end_col and len(columns) > 9:
             end_col = columns[9]   # 10列目
         
-        print(f"特定された列: 手術室={room_col}, 入室={start_col}, 退室={end_col}")
-        
         if not all([start_col, end_col, room_col]):
-            print("必要な列が特定できませんでした")
             return 0.0
         
         # 対象手術室（OR1〜OR12、OR11除く）
         target_rooms = [f'OR{i}' for i in range(1, 13) if i != 11]
-        print(f"対象手術室: {target_rooms}")
         
         # 手術室名を正規化
         weekday_df['normalized_room'] = _normalize_room_name(weekday_df[room_col])
-        
-        # 正規化結果をデバッグ出力
-        print("=== 手術室名正規化結果の確認 ===")
-        original_rooms = weekday_df[room_col].value_counts().head(10)
-        print("元の手術室名（上位10件）:")
-        for room, count in original_rooms.items():
-            normalized = _normalize_room_name(pd.Series([room])).iloc[0]
-            print(f"  '{room}' -> '{normalized}' ({count}件)")
-        
-        normalized_rooms = weekday_df['normalized_room'].value_counts()
-        print(f"\n正規化後の手術室分布:")
-        for room, count in normalized_rooms.items():
-            if pd.notna(room):
-                print(f"  {room}: {count}件")
-        print(f"  NULL/不明: {weekday_df['normalized_room'].isna().sum()}件")
         
         # 対象手術室でフィルタリング
         filtered_df = weekday_df[weekday_df['normalized_room'].isin(target_rooms)].copy()
         
         if filtered_df.empty:
-            print("対象手術室でのデータが見つかりませんでした")
-            print("利用可能な正規化後手術室:", weekday_df['normalized_room'].dropna().unique())
             return 0.0
-        
-        print(f"対象データ件数: {len(filtered_df)}")
         
         # 時刻をdatetimeに変換
         filtered_df['start_datetime'] = _convert_to_datetime(
@@ -224,17 +193,11 @@ def calculate_operating_room_utilization(df, period_df):
         valid_time_df = filtered_df.dropna(subset=['start_datetime', 'end_datetime']).copy()
         
         if valid_time_df.empty:
-            print("有効な時刻データがありませんでした")
-            print(f"入室時刻サンプル: {filtered_df[start_col].head()}")
-            print(f"退室時刻サンプル: {filtered_df[end_col].head()}")
             return 0.0
-        
-        print(f"有効な時刻データ件数: {len(valid_time_df)}")
         
         # 終了時刻が開始時刻より早い場合（日をまたぐ）は翌日とする
         overnight_mask = valid_time_df['end_datetime'] < valid_time_df['start_datetime']
         if overnight_mask.any():
-            print(f"日をまたぐ手術: {overnight_mask.sum()}件")
             valid_time_df.loc[overnight_mask, 'end_datetime'] += timedelta(days=1)
         
         # 稼働時間の計算
@@ -257,8 +220,6 @@ def calculate_operating_room_utilization(df, period_df):
                 usage_minutes = (actual_end - actual_start).total_seconds() / 60
                 total_usage_minutes += usage_minutes
         
-        print(f"総手術時間: {total_usage_minutes:.1f}分")
-        
         # 期間内の平日数を計算
         period_start = period_df['手術実施日_dt'].min()
         period_end = period_df['手術実施日_dt'].max()
@@ -267,28 +228,20 @@ def calculate_operating_room_utilization(df, period_df):
         weekdays = pd.bdate_range(start=period_start, end=period_end)
         total_weekdays = len(weekdays)
         
-        print(f"期間内平日数: {total_weekdays}日")
-        
         # 稼働率を計算
         # 総稼働可能時間 = 495分 × 11室 × 平日数
         num_rooms = 11
         operation_minutes_per_day = 495  # 9:00-17:15 = 495分
         total_available_minutes = total_weekdays * num_rooms * operation_minutes_per_day
         
-        print(f"総稼働可能時間: {total_available_minutes:.1f}分")
-        
         if total_available_minutes > 0:
             utilization_rate = (total_usage_minutes / total_available_minutes) * 100
             utilization_rate = min(utilization_rate, 100.0)  # 100%を上限とする
-            print(f"稼働率: {utilization_rate:.1f}%")
             return utilization_rate
         else:
             return 0.0
             
     except Exception as e:
-        print(f"稼働率計算でエラーが発生しました: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return 0.0
 
 def get_kpi_summary(df, latest_date):

@@ -70,12 +70,45 @@ def plot_surgeon_ranking(surgeon_summary, top_n, department_name):
     # 上位N人を選択
     top_surgeons = surgeon_summary.head(top_n)
     
+    # 列名を柔軟に対応
+    surgeon_col = None
+    count_col = None
+    
+    # 術者名の列を特定
+    for col in surgeon_summary.columns:
+        if any(keyword in col for keyword in ['術者', 'surgeon', '医師', 'doctor', '実施術者']):
+            surgeon_col = col
+            break
+    
+    # 件数の列を特定
+    for col in surgeon_summary.columns:
+        if any(keyword in col for keyword in ['件数', 'count', '数', 'num']):
+            count_col = col
+            break
+    
+    # フォールバック：インデックスまたは最初の列を術者、2番目の列を件数として使用
+    if not surgeon_col:
+        if surgeon_summary.index.name:
+            # インデックスが術者名の場合
+            surgeon_col = surgeon_summary.index.name
+            top_surgeons = top_surgeons.reset_index()
+        elif len(surgeon_summary.columns) > 0:
+            surgeon_col = surgeon_summary.columns[0]
+    
+    if not count_col and len(surgeon_summary.columns) > 1:
+        count_col = surgeon_summary.columns[1]
+    elif not count_col and len(surgeon_summary.columns) > 0:
+        count_col = surgeon_summary.columns[0]
+    
+    if not surgeon_col or not count_col:
+        return go.Figure()
+    
     fig = go.Figure(data=go.Bar(
-        x=top_surgeons['件数'],
-        y=top_surgeons['術者名'],
+        x=top_surgeons[count_col],
+        y=top_surgeons[surgeon_col],
         orientation='h',
         marker_color='lightblue',
-        text=top_surgeons['件数'],
+        text=top_surgeons[count_col],
         textposition='outside'
     ))
     
