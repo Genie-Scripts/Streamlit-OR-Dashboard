@@ -10,34 +10,35 @@ def _convert_to_datetime(series, date_series):
     try:
         # まず数値（Excel時間）として試す
         numeric_series = pd.to_numeric(series, errors='coerce')
-        if numeric_series.notna().sum() > 0 and (numeric_series.notna().sum() / len(series.dropna()) > 0.8):
+        if numeric_series.notna().sum() > 0 and len(series.dropna()) > 0 and (numeric_series.notna().sum() / len(series.dropna()) > 0.8):
             time_deltas = pd.to_timedelta(numeric_series * 24, unit='h', errors='coerce')
-            return pd.to_datetime(date_series) + time_deltas
+            # pd.to_datetimeにSeriesを渡す
+            return pd.to_datetime(date_series.astype(str)) + time_deltas
         
         # テキスト時間として処理 (formatを指定せず、pandasの自動解析に任せる)
         time_only_series = pd.to_datetime(series, errors='coerce', format=None).dt.time
         
-        # NaTでない有効な値のみを処理
         valid_times = time_only_series.notna()
         combined_dt = pd.Series(pd.NaT, index=series.index)
         
-        # 日付と時刻を結合
-        # .locを使用して、有効なインデックスに対してのみ操作を行う
-        combined_dt.loc[valid_times] = [datetime.combine(d, t) for d, t in zip(date_series[valid_times], time_only_series[valid_times])]
+        if valid_times.any():
+            # .locを使用して、有効なインデックスに対してのみ操作を行う
+            date_series_valid = date_series[valid_times]
+            time_only_series_valid = time_only_series[valid_times]
+            combined_dt.loc[valid_times] = [datetime.combine(d, t) for d, t in zip(date_series_valid, time_only_series_valid)]
+
         return combined_dt
     except Exception:
-        # エラーが発生した場合は、NaT（Not a Time）のシリーズを返す
         return pd.Series(pd.NaT, index=series.index)
 
-
-def calculate_operating_room_utilization(df):
+def calculate_operating_room_utilization(df, period_df):
     """
-    手術室の稼働率を計算する。（Excel数値時間・テキスト時間両対応）
+    手術室の稼働率を計算する。（対象を特定の11部屋に限定し、全手術を対象）
     """
-    if df.empty or 'is_weekday' not in df.columns:
+    if df.empty or period_df.empty or 'is_weekday' not in df.columns:
         return 0.0
 
-    weekday_df = df[df['is_weekday']].copy()
+    weekday_df = period_df[period_df['is_weekday']].copy()
     if weekday_df.empty:
         return 0.0
         
@@ -55,41 +56,54 @@ def calculate_operating_room_utilization(df):
     
     if start_col and end_col and room_col:
         try:
-            weekday_df['start_datetime'] = _convert_to_datetime(weekday_df[start_col], weekday_df['手術実施日_dt'].dt.date)
-            weekday_df['end_datetime'] = _convert_to_datetime(weekday_df[end_col], weekday_df['手術実施日_dt'].dt.date)
-            weekday_df.dropna(subset=['start_datetime', 'end_datetime'], inplace=True)
-            
-            if weekday_df.empty: raise ValueError("有効な時刻データがありません。")
+            target_rooms = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
+            filtered_weekday_df = weekday_df[weekday_df[room_col].isin(target_rooms)].copy()
 
-            overnight_mask = weekday_df['end_datetime'] < weekday_df['start_datetime']
-            weekday_df.loc[overnight_mask, 'end_datetime'] += pd.Timedelta(days=1)
+            if filtered_weekday_df.empty:
+                return 0.0
+
+            filtered_weekday_df['start_datetime'] = _convert_to_datetime(filtered_weekday_df[start_col], filtered_weekday_df['手術実施日_dt'].dt.date)
+            filtered_weekday_df['end_datetime'] = _convert_to_datetime(filtered_weekday_df[end_col], filtered_weekday_df['手術実施日_dt'].dt.date)
+            filtered_weekday_df.dropna(subset=['start_datetime', 'end_datetime'], inplace=True)
+            
+            if filtered_weekday_df.empty: raise ValueError("有効な時刻データがありません。")
+
+            overnight_mask = filtered_weekday_df['end_datetime'] < filtered_weekday_df['start_datetime']
+            filtered_weekday_df.loc[overnight_mask, 'end_datetime'] += pd.Timedelta(days=1)
             
             total_usage_minutes = 0
             op_start_time = time(9, 0); op_end_time = time(17, 15)
-            for _, row in weekday_df.iterrows():
+            for _, row in filtered_weekday_df.iterrows():
                 day = row['手術実施日_dt'].date()
                 operation_start = datetime.combine(day, op_start_time)
                 operation_end = datetime.combine(day, op_end_time)
-                
                 actual_start = max(row['start_datetime'], operation_start)
                 actual_end = min(row['end_datetime'], operation_end)
-                
                 if actual_end > actual_start:
                     total_usage_minutes += (actual_end - actual_start).total_seconds() / 60
             
-            num_operating_days = weekday_df['手術実施日_dt'].dt.date.nunique()
-            num_rooms = 11 
-            total_available_minutes = num_operating_days * num_rooms * 495
+            period_start_date = period_df['手術実施日_dt'].min()
+            period_end_date = period_df['手術実施日_dt'].max()
+            total_weekdays_in_period = sum(1 for d in pd.date_range(period_start_date, period_end_date) if date_helpers.is_weekday(d))
+            
+            num_rooms = 11
+            total_available_minutes = total_weekdays_in_period * num_rooms * 495
 
             if total_available_minutes > 0:
                 return min((total_usage_minutes / total_available_minutes) * 100, 100.0)
         except Exception:
             pass
 
-    total_weekday_cases = len(weekday_df[weekday_df['is_gas_20min']])
-    total_operating_days = weekday_df['手術実施日_dt'].nunique()
-    if total_operating_days > 0:
-        avg_cases_per_day = total_weekday_cases / total_operating_days
+    target_rooms_fallback = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
+    if room_col in weekday_df.columns:
+        weekday_df = weekday_df[weekday_df[room_col].isin(target_rooms_fallback)]
+        
+    total_weekday_cases = len(weekday_df)
+    
+    period_start_date = period_df['手術実施日_dt'].min(); period_end_date = period_df['手術実施日_dt'].max()
+    total_weekdays_in_period = sum(1 for d in pd.date_range(period_start_date, period_end_date) if date_helpers.is_weekday(d))
+    if total_weekdays_in_period > 0:
+        avg_cases_per_day = total_weekday_cases / total_weekdays_in_period
         return min((avg_cases_per_day / 20) * 100, 100.0)
 
     return 0.0
@@ -98,7 +112,7 @@ def get_kpi_summary(df, latest_date):
     if df.empty: return {}
     recent_df = date_helpers.filter_by_period(df, latest_date, "直近30日")
     
-    utilization_rate = calculate_operating_room_utilization(recent_df)
+    utilization_rate = calculate_operating_room_utilization(df, recent_df)
     
     gas_df = recent_df[recent_df['is_gas_20min']]
     if gas_df.empty: 
@@ -148,8 +162,44 @@ def get_department_performance_summary(df, target_dict, latest_date):
     if not results: return pd.DataFrame()
     return pd.DataFrame(results)
 
-# (calculate_achievement_rates と calculate_cumulative_cases は変更不要なため省略)
 def calculate_achievement_rates(df, target_dict):
-    return pd.DataFrame()
+    if df.empty or not target_dict: return pd.DataFrame()
+    gas_df = df[df['is_gas_20min']].copy()
+    if gas_df.empty: return pd.DataFrame()
+    actual_start_date = gas_df['手術実施日_dt'].min(); actual_end_date = gas_df['手術実施日_dt'].max()
+    period_days = (actual_end_date - actual_start_date).days + 1
+    weeks_in_period = period_days / 7.0
+    if weeks_in_period <= 0: return pd.DataFrame()
+    dept_counts = gas_df.groupby('実施診療科').size().reset_index(name='実績件数')
+    result = []
+    for _, row in dept_counts.iterrows():
+        dept = row['実施診療科']
+        if dept in target_dict:
+            actual_count = row['実績件数']
+            weekly_target = target_dict[dept]
+            target_count_period = weekly_target * weeks_in_period
+            achievement_rate = (actual_count / target_count_period) * 100 if target_count_period > 0 else 0
+            result.append({
+                '診療科': dept, '実績件数': actual_count, '期間内目標件数': round(target_count_period, 1),
+                '達成率(%)': round(achievement_rate, 1)
+            })
+    if not result: return pd.DataFrame()
+    return pd.DataFrame(result).sort_values('達成率(%)', ascending=False).reset_index(drop=True)
+
 def calculate_cumulative_cases(df, target_weekly_cases):
-    return pd.DataFrame()
+    if df.empty: return pd.DataFrame()
+    fiscal_year = date_helpers.get_fiscal_year(df['手術実施日_dt'].max())
+    start_fiscal_year = pd.Timestamp(fiscal_year, 4, 1)
+    df_fiscal = df[(df['手術実施日_dt'] >= start_fiscal_year) & (df['is_gas_20min'])].copy()
+    if df_fiscal.empty: return pd.DataFrame()
+    weekly_actual = df_fiscal.groupby('week_start').size().reset_index(name='週次実績')
+    min_week = df_fiscal['week_start'].min(); max_week = df_fiscal['week_start'].max()
+    all_weeks = pd.date_range(start=min_week, end=max_week, freq='W-MON')
+    weekly_df = pd.DataFrame({'週': all_weeks})
+    weekly_df = pd.merge(weekly_df, weekly_actual, left_on='週', right_on='week_start', how='left').fillna(0)
+    weekly_df = weekly_df.sort_values('週')
+    weekly_df['週次実績'] = weekly_df['週次実績'].astype(int)
+    weekly_df['累積実績'] = weekly_df['週次実績'].cumsum()
+    weekly_df['経過週'] = np.arange(len(weekly_df)) + 1
+    weekly_df['累積目標'] = weekly_df['経過週'] * target_weekly_cases
+    return weekly_df[['週', '週次実績', '累積実績', '累積目標']]
