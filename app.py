@@ -59,6 +59,52 @@ def _convert_to_datetime(series, date_series):
         return pd.Series(pd.NaT, index=series.index)
 
 def calculate_operating_room_utilization(df, period_df):
+
+    # ▼▼▼▼▼ ここからデバッグコードを挿入 ▼▼▼▼▼
+    st.subheader("🔬 稼働率計算 デバッグ情報")
+    st.info("この情報をお知らせください。")
+
+    # --- チェック1: 渡されたデータの確認 ---
+    st.write("#### 1. 関数に渡されたデータの先頭5行")
+    st.dataframe(period_df.head())
+
+    # --- チェック2: 列名の検出 ---
+    st.write("#### 2. 検出された列名")
+    start_col, end_col, room_col = None, None, None
+    possible_start_keys=['入室時刻', '開始']; possible_end_keys=['退室時刻', '終了']; possible_room_keys=['実施手術室', '手術室']
+    for col in period_df.columns:
+        if not start_col and any(key in col for key in possible_start_keys): start_col = col
+        if not end_col and any(key in col for key in possible_end_keys): end_col = col
+        if not room_col and any(key in col for key in possible_room_keys): room_col = col
+    
+    st.write(f"- `入室時刻`として検出された列: `{start_col}`")
+    st.write(f"- `退室時刻`として検出された列: `{end_col}`")
+    st.write(f"- `手術室`として検出された列: `{room_col}`")
+    
+    if not all([start_col, end_col, room_col]):
+        st.error("必要な列が見つかりませんでした。ここで処理が停止します。")
+        return 0.0 # 早期リターン
+
+    # --- チェック3: 手術室名の正規化 ---
+    st.write("#### 3. 手術室名の正規化チェック")
+    normalized_names = _normalize_room_name(period_df[room_col])
+    check_df = pd.DataFrame({
+        '元の名前': period_df[room_col],
+        '正規化後の名前': normalized_names
+    }).dropna(subset=['元の名前']).head(10)
+    st.dataframe(check_df)
+
+    # --- チェック4: フィルタリング結果 ---
+    st.write("#### 4. フィルタリング結果")
+    target_rooms = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
+    filtered_count = normalized_names.isin(target_rooms).sum()
+    st.metric("対象11部屋に一致した件数", f"{filtered_count} 件")
+
+    if filtered_count == 0:
+        st.error("一致件数が0件のため、稼働率が0%になっています。正規化処理がうまくいっていないか、対象期間に対象の手術室が存在しないようです。")
+
+    # ▲▲▲▲▲ ここまでデバッグコード ▲▲▲▲▲
+
     """手術室の稼働率を計算する"""
     if df.empty or period_df.empty: return 0.0
 
