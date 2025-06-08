@@ -1,3 +1,4 @@
+# analysis/ranking.py (v6.0 最終完成版)
 import pandas as pd
 import numpy as np
 from datetime import datetime, time
@@ -23,7 +24,6 @@ def _normalize_room_name(series):
     extracted_numbers = half_width_series.str.extract(r'(\d+)', expand=False)
 
     # ステップ3: 'OR'を先頭に付与 (数字が抽出できたもののみ)
-    # dropna()で数字がなかった行（例：「外手セ」）は無視される
     return 'OR' + extracted_numbers.dropna()
 
 
@@ -64,8 +64,6 @@ def calculate_operating_room_utilization(df, period_df):
         if not start_col and any(key in col for key in possible_start_keys): start_col = col
         if not end_col and any(key in col for key in possible_end_keys): end_col = col
         if not room_col and any(key in col for key in possible_room_keys): room_col = col
-        if not start_col and 'üº' in col: start_col = col
-        if not end_col and 'Þº' in col: end_col = col
     
     if start_col and end_col and room_col:
         try:
@@ -112,6 +110,7 @@ def calculate_operating_room_utilization(df, period_df):
             print(f"詳細な稼働率計算でエラー: {e}。簡易計算に切り替えます。")
             pass
 
+    # フォールバック（簡易計算）
     target_rooms_fallback = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
     if room_col in weekday_df.columns:
         normalized_room_fallback = _normalize_room_name(weekday_df[room_col])
@@ -134,14 +133,8 @@ def get_kpi_summary(df, latest_date):
     utilization_rate = calculate_operating_room_utilization(df, recent_df)
     
     gas_df = recent_df[recent_df['is_gas_20min']]
-    if gas_df.empty: 
-        return {
-            "総手術件数 (直近30日)": 0, "1日あたり平均件数": "0.0",
-            "平日1日あたり平均件数": "0.0", "手術室稼働率": f"{utilization_rate:.1f}%"
-        }
-
     total_cases = len(gas_df)
-    days_in_period = (gas_df['手術実施日_dt'].max() - gas_df['手術実施日_dt'].min()).days + 1
+    days_in_period = (gas_df['手術実施日_dt'].max() - gas_df['手術実施日_dt'].min()).days + 1 if not gas_df.empty else 0
     daily_average = total_cases / days_in_period if days_in_period > 0 else 0
     
     weekday_df = gas_df[gas_df['is_weekday']]
