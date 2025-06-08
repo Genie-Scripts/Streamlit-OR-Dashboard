@@ -1,8 +1,8 @@
-# analysis/ranking.py (修正版)
+# analysis/ranking.py (列名修正版)
 import pandas as pd
 import numpy as np
 from utils import date_helpers
-from analysis import weekly # weeklyモジュールをインポート
+from analysis import weekly
 
 def calculate_achievement_rates(df, target_dict):
     """
@@ -79,23 +79,16 @@ def get_department_performance_summary(df, target_dict, latest_date):
     if df.empty or not target_dict:
         return pd.DataFrame()
 
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    # ★ ここが修正された箇所です ★
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    # weeklyモジュールから分析終了日を取得
     analysis_end_date = weekly.get_analysis_end_date(latest_date)
     if analysis_end_date is None:
         return pd.DataFrame()
         
-    # 分析終了日から遡って4週間（28日前）を開始日とする
     start_date_filter = analysis_end_date - pd.Timedelta(days=27)
     
-    # 期間でデータをフィルタリング
     four_weeks_df = df[
         (df['手術実施日_dt'] >= start_date_filter) &
         (df['手術実施日_dt'] <= analysis_end_date)
     ]
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     gas_df = four_weeks_df[four_weeks_df['is_gas_20min']]
     
@@ -110,21 +103,23 @@ def get_department_performance_summary(df, target_dict, latest_date):
             
         total_cases = len(dept_data)
         num_weeks = dept_data['week_start'].nunique()
-        # 4週間のデータがない場合も考慮
         avg_weekly = total_cases / 4 if num_weeks == 0 else total_cases / num_weeks
 
         target = target_dict.get(dept, 0)
         achievement_rate = (avg_weekly / target) * 100 if target > 0 else 0
         
-        latest_week_start = dept_data['week_start'].max()
+        latest_week_start = dept_data['week_start'].max() if not dept_data.empty else pd.NaT
         latest_week_cases = len(dept_data[dept_data['week_start'] == latest_week_start])
 
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # ★ ここが修正された箇所です ★
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         results.append({
             "診療科": dept,
             "4週平均": avg_weekly,
             "直近週実績": latest_week_cases,
             "週次目標": target,
-            "達成率": achievement_rate,
+            "達成率(%)": achievement_rate, # 「達成率」から「達成率(%)」に変更
         })
 
     if not results:
