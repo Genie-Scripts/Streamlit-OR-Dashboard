@@ -96,22 +96,68 @@ def create_forecast_chart(result_df, title):
     if result_df.empty:
         return go.Figure()
     
+    # デバッグ情報を表示
+    st.write("**デバッグ情報:**")
+    st.write(f"データフレームの列: {list(result_df.columns)}")
+    st.write(f"データフレームの形状: {result_df.shape}")
+    st.write("**データサンプル:**")
+    st.dataframe(result_df.head())
+    
     fig = go.Figure()
     
-    # 実績データと予測データを分離
-    actual_df = result_df[result_df['タイプ'] == '実績'].copy()
-    forecast_df = result_df[result_df['タイプ'] == '予測'].copy()
+    # データ構造を柔軟に処理
+    if 'タイプ' in result_df.columns:
+        # タイプ列がある場合の処理
+        actual_df = result_df[result_df['タイプ'] == '実績'].copy()
+        forecast_df = result_df[result_df['タイプ'] == '予測'].copy()
+        
+        # 列名を推定
+        date_col = None
+        value_col = None
+        for col in result_df.columns:
+            if col in ['月', '日付', 'date', 'Date', '期間']:
+                date_col = col
+            elif col in ['値', '件数', 'value', 'Value', '予測値']:
+                value_col = col
+        
+        if not date_col:
+            date_col = result_df.columns[0]  # 最初の列を日付とする
+        if not value_col:
+            value_col = result_df.columns[1] if len(result_df.columns) > 1 else result_df.columns[0]
+        
+    else:
+        # タイプ列がない場合は、インデックスや列構造から推定
+        st.warning("'タイプ'列が見つかりません。データ構造から実績・予測を推定します。")
+        
+        # 可能な列名を検索
+        date_col = None
+        value_col = None
+        
+        for col in result_df.columns:
+            if any(keyword in str(col).lower() for keyword in ['date', '日付', '月', '期間', 'time']):
+                date_col = col
+            elif any(keyword in str(col).lower() for keyword in ['value', '値', '件数', 'count', '予測']):
+                value_col = col
+        
+        # 列名が特定できない場合は最初の2列を使用
+        if not date_col and len(result_df.columns) > 0:
+            date_col = result_df.columns[0]
+        if not value_col and len(result_df.columns) > 1:
+            value_col = result_df.columns[1]
+        elif not value_col:
+            value_col = result_df.columns[0]
+        
+        # 全データを予測として扱う（実績・予測の区別ができない場合）
+        actual_df = pd.DataFrame()
+        forecast_df = result_df.copy()
     
-    # 実績と予測の間に切れ目を作るため、実績の最終点を予測の先頭に追加
-    if not actual_df.empty and not forecast_df.empty:
-        connector = actual_df.tail(1).copy()
-        forecast_df = pd.concat([connector, forecast_df], ignore_index=True)
+    st.write(f"使用する列: 日付={date_col}, 値={value_col}")
     
     # 実績データのプロット
-    if not actual_df.empty:
+    if not actual_df.empty and date_col in actual_df.columns and value_col in actual_df.columns:
         fig.add_trace(go.Scatter(
-            x=actual_df['月'], 
-            y=actual_df['値'], 
+            x=actual_df[date_col], 
+            y=actual_df[value_col], 
             name='実績',
             mode='lines+markers',
             line=dict(color='blue', width=2),
@@ -119,13 +165,13 @@ def create_forecast_chart(result_df, title):
         ))
     
     # 予測データのプロット
-    if not forecast_df.empty:
+    if not forecast_df.empty and date_col in forecast_df.columns and value_col in forecast_df.columns:
         fig.add_trace(go.Scatter(
-            x=forecast_df['月'], 
-            y=forecast_df['値'], 
-            name='予測',
+            x=forecast_df[date_col], 
+            y=forecast_df[value_col], 
+            name='予測' if actual_df.empty else '予測',
             mode='lines+markers',
-            line=dict(color='red', width=2, dash='dash'),
+            line=dict(color='red', width=2, dash='dash' if not actual_df.empty else 'solid'),
             marker=dict(size=6)
         ))
     
