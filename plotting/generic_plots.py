@@ -96,3 +96,17 @@ def create_validation_chart(train, test, predictions):
 
     fig.update_layout(title="予測モデル精度検証", xaxis_title="月", yaxis_title="値", **sc.LAYOUT_DEFAULTS)
     return fig
+
+def plot_cumulative_cases_chart(df, title):
+    """累積実績と目標のグラフを作成する"""
+    if df.empty or '累積実績' not in df.columns:
+        return go.Figure().update_layout(title="累積実績データがありません")
+        
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df['週'], y=df['累積実績'], name='累積実績', mode='lines+markers', line=dict(color=sc.PRIMARY_COLOR)))
+    
+    if '累積目標' in df.columns and df['累積目標'].sum() > 0:
+        fig.add_trace(go.Scatter(x=df['週'], y=df['累積目標'], name='累積目標', mode='lines', line=sc.TARGET_LINE_STYLE))
+        
+    fig.update_layout(title=title, xaxis_title="週", yaxis_title="累積件数", **sc.LAYOUT_DEFAULTS)
+    return fig
