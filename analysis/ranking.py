@@ -1,7 +1,8 @@
-# analysis/ranking.py
+# analysis/ranking.py (修正版)
 import pandas as pd
 import numpy as np
 from utils import date_helpers
+from analysis import weekly # weeklyモジュールをインポート
 
 def calculate_achievement_rates(df, target_dict):
     """
@@ -78,46 +79,58 @@ def get_department_performance_summary(df, target_dict, latest_date):
     if df.empty or not target_dict:
         return pd.DataFrame()
 
-    # 直近の完全な4週間分のデータを取得
-    from analysis import weekly
-    four_weeks_df = df.copy()
-    # 4週間分のデータをフィルタリングするため、少し広めに期間を取る
-    start_date_filter = latest_date - pd.Timedelta(days=35)
-    four_weeks_df = four_weeks_df[four_weeks_df['手術実施日_dt'] >= start_date_filter]
-    four_weeks_df = four_weeks_df[weekly._get_complete_week_filter(four_weeks_df)]
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # ★ ここが修正された箇所です ★
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # weeklyモジュールから分析終了日を取得
+    analysis_end_date = weekly.get_analysis_end_date(latest_date)
+    if analysis_end_date is None:
+        return pd.DataFrame()
+        
+    # 分析終了日から遡って4週間（28日前）を開始日とする
+    start_date_filter = analysis_end_date - pd.Timedelta(days=27)
     
+    # 期間でデータをフィルタリング
+    four_weeks_df = df[
+        (df['手術実施日_dt'] >= start_date_filter) &
+        (df['手術実施日_dt'] <= analysis_end_date)
+    ]
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
     gas_df = four_weeks_df[four_weeks_df['is_gas_20min']]
     
     if gas_df.empty:
         return pd.DataFrame()
 
     results = []
-    for dept, target in target_dict.items():
+    for dept in target_dict.keys():
         dept_data = gas_df[gas_df['実施診療科'] == dept]
         if dept_data.empty:
             continue
             
         total_cases = len(dept_data)
         num_weeks = dept_data['week_start'].nunique()
-        avg_weekly = total_cases / num_weeks if num_weeks > 0 else 0
+        # 4週間のデータがない場合も考慮
+        avg_weekly = total_cases / 4 if num_weeks == 0 else total_cases / num_weeks
+
+        target = target_dict.get(dept, 0)
         achievement_rate = (avg_weekly / target) * 100 if target > 0 else 0
         
-        # 直近週の実績
         latest_week_start = dept_data['week_start'].max()
         latest_week_cases = len(dept_data[dept_data['week_start'] == latest_week_start])
 
         results.append({
             "診療科": dept,
             "4週平均": avg_weekly,
-            "直近週": latest_week_cases,
+            "直近週実績": latest_week_cases,
             "週次目標": target,
-            "達成率(%)": achievement_rate,
+            "達成率": achievement_rate,
         })
 
     if not results:
         return pd.DataFrame()
         
-    return pd.DataFrame(results).sort_values("達成率(%)", ascending=False)
+    return pd.DataFrame(results)
 
 def calculate_cumulative_cases(df, target_weekly_cases):
     """
