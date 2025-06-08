@@ -129,11 +129,7 @@ def render_hospital_page(df, target_dict, latest_date):
     perf_summary = ranking.get_department_performance_summary(df, target_dict, latest_date)
 
     if not perf_summary.empty:
-        
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        # ★ ここが最終修正箇所です ★
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        
+
         # デバッグのために、まず実際の列名を出力
         st.info(f"デバッグ情報: パフォーマンスデータの列名 -> {perf_summary.columns.to_list()}")
 
