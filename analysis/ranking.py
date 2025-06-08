@@ -1,8 +1,116 @@
-# analysis/ranking.py (最終修正版)
 import pandas as pd
 import numpy as np
 from utils import date_helpers
 from analysis import weekly
+
+def calculate_operating_room_utilization(df):
+    """
+    手術室の稼働率を計算する。
+    - 平日の9:00-17:15を稼働時間と定義
+    - 入退室時刻データが存在する場合は、実時間で計算
+    - データがない場合は、件数から推定値を計算
+    """
+    if df.empty:
+        return 0.0
+
+    # is_weekday列が存在するか確認
+    if 'is_weekday' not in df.columns:
+        return 0.0 # 前提条件を満たさない
+
+    weekday_df = df[df['is_weekday']].copy()
+    if weekday_df.empty:
+        return 0.0
+        
+    start_col, end_col, room_col = None, None, None
+    
+    # 列名の候補
+    start_time_columns = ['入室時刻', '開始時刻', '麻酔開始時刻', '手術開始時刻']
+    end_time_columns = ['退室時刻', '終了時刻', '麻酔終了時刻', '手術終了時刻']
+    room_columns = ['実施手術室', '手術室', 'OR', '部屋']
+
+    # 存在する列名を取得
+    for col in start_time_columns:
+        if col in weekday_df.columns: start_col = col; break
+    for col in end_time_columns:
+        if col in weekday_df.columns: end_col = col; break
+    for col in room_columns:
+        if col in weekday_df.columns: room_col = col; break
+
+    # --- 詳細計算ロジック (時刻と部屋データがある場合) ---
+    if start_col and end_col and room_col:
+        # 時刻データをdatetimeオブジェクトに変換 (エラーは無視)
+        weekday_df[start_col] = pd.to_datetime(weekday_df[start_col], errors='coerce')
+        weekday_df[end_col] = pd.to_datetime(weekday_df[end_col], errors='coerce')
+        weekday_df.dropna(subset=[start_col, end_col], inplace=True)
+        
+        # 翌日にまたがる場合の処理
+        overnight_mask = weekday_df[end_col] < weekday_df[start_col]
+        weekday_df.loc[overnight_mask, end_col] += pd.Timedelta(days=1)
+        
+        total_usage_minutes = 0
+        
+        # 稼働時間 (9:00 - 17:15)
+        op_start_time = pd.Timestamp('09:00:00').time()
+        op_end_time = pd.Timestamp('17:15:00').time()
+
+        for _, row in weekday_df.iterrows():
+            day = row['手術実施日_dt'].date()
+            operation_start = datetime.combine(day, op_start_time)
+            operation_end = datetime.combine(day, op_end_time)
+
+            # 手術時間と稼働時間の重複部分を計算
+            actual_start = max(row[start_col], operation_start)
+            actual_end = min(row[end_col], operation_end)
+            
+            if actual_end > actual_start:
+                usage_minutes = (actual_end - actual_start).total_seconds() / 60
+                total_usage_minutes += usage_minutes
+        
+        # 利用可能な総時間を計算
+        num_operating_days = weekday_df['手術実施日_dt'].dt.date.nunique()
+        # 1日の稼働時間: 8時間15分 = 495分
+        # 手術室の数を仮に11部屋とする (必要に応じて調整)
+        num_rooms = 11 
+        total_available_minutes = num_operating_days * num_rooms * 495
+
+        if total_available_minutes > 0:
+            return min((total_usage_minutes / total_available_minutes) * 100, 100.0)
+
+    # --- 簡易計算ロジック (詳細データがない場合) ---
+    total_weekday_cases = len(weekday_df)
+    total_operating_days = weekday_df['手術実施日_dt'].nunique()
+    if total_operating_days > 0:
+        avg_cases_per_day = total_weekday_cases / total_operating_days
+        # 1日の手術室キャパシティを20件として推定
+        return min((avg_cases_per_day / 20) * 100, 100.0)
+
+    return 0.0
+
+def get_kpi_summary(df, latest_date):
+    """
+    ダッシュボード用の主要KPIサマリーを計算する。
+    """
+    if df.empty: return {}
+    recent_df = date_helpers.filter_by_period(df, latest_date, "直近30日")
+    gas_df = recent_df[recent_df['is_gas_20min']]
+    if gas_df.empty: return {}
+
+    total_cases = len(gas_df)
+    days_in_period = (gas_df['手術実施日_dt'].max() - gas_df['手術実施日_dt'].min()).days + 1
+    daily_average = total_cases / days_in_period if days_in_period > 0 else 0
+    
+    weekday_df = gas_df[gas_df['is_weekday']]
+    total_operating_days = weekday_df['手術実施日_dt'].nunique()
+    avg_cases_per_weekday = len(weekday_df) / total_operating_days if total_operating_days > 0 else 0
+
+    utilization_rate = calculate_operating_room_utilization(gas_df)
+
+    return {
+        "総手術件数 (直近30日)": total_cases,
+        "1日あたり平均件数": f"{daily_average:.1f}",
+        "平日1日あたり平均件数": f"{avg_cases_per_weekday:.1f}",
+        "手術室稼働率": f"{utilization_rate:.1f}%" # ラベルを「(推定)」から変更
+    }
 
 def calculate_achievement_rates(df, target_dict):
     """
