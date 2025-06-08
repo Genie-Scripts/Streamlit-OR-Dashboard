@@ -5,17 +5,12 @@ from analysis import weekly
 
 def calculate_operating_room_utilization(df):
     """
-    手術室の稼働率を計算する。
-    - 平日の9:00-17:15を稼働時間と定義
-    - 入退室時刻データが存在する場合は、実時間で計算
-    - データがない場合は、件数から推定値を計算
+    手術室の稼働率を計算する。（列名探索を強化）
     """
     if df.empty:
         return 0.0
-
-    # is_weekday列が存在するか確認
     if 'is_weekday' not in df.columns:
-        return 0.0 # 前提条件を満たさない
+        return 0.0
 
     weekday_df = df[df['is_weekday']].copy()
     if weekday_df.empty:
@@ -23,60 +18,67 @@ def calculate_operating_room_utilization(df):
         
     start_col, end_col, room_col = None, None, None
     
-    # 列名の候補
-    start_time_columns = ['入室時刻', '開始時刻', '麻酔開始時刻', '手術開始時刻']
-    end_time_columns = ['退室時刻', '終了時刻', '麻酔終了時刻', '手術終了時刻']
-    room_columns = ['実施手術室', '手術室', 'OR', '部屋']
+    # --- 列名探索ロジックを強化 ---
+    possible_start_keys = ['入室時刻', '開始']
+    possible_end_keys = ['退室時刻', '終了']
+    possible_room_keys = ['実施手術室', '手術室']
 
-    # 存在する列名を取得
-    for col in start_time_columns:
-        if col in weekday_df.columns: start_col = col; break
-    for col in end_time_columns:
-        if col in weekday_df.columns: end_col = col; break
-    for col in room_columns:
-        if col in weekday_df.columns: room_col = col; break
+    for col in df.columns:
+        # 標準名または部分一致で検索
+        if not start_col and any(key in col for key in possible_start_keys):
+            start_col = col
+        if not end_col and any(key in col for key in possible_end_keys):
+            end_col = col
+        if not room_col and any(key in col for key in possible_room_keys):
+            room_col = col
+            
+        # 文字化けも考慮
+        if not start_col and 'üº' in col: start_col = col
+        if not end_col and 'Þº' in col: end_col = col
+    # --- 探索ロジックここまで ---
 
     # --- 詳細計算ロジック (時刻と部屋データがある場合) ---
     if start_col and end_col and room_col:
-        # 時刻データをdatetimeオブジェクトに変換 (エラーは無視)
-        weekday_df[start_col] = pd.to_datetime(weekday_df[start_col], errors='coerce')
-        weekday_df[end_col] = pd.to_datetime(weekday_df[end_col], errors='coerce')
-        weekday_df.dropna(subset=[start_col, end_col], inplace=True)
-        
-        # 翌日にまたがる場合の処理
-        overnight_mask = weekday_df[end_col] < weekday_df[start_col]
-        weekday_df.loc[overnight_mask, end_col] += pd.Timedelta(days=1)
-        
-        total_usage_minutes = 0
-        
-        # 稼働時間 (9:00 - 17:15)
-        op_start_time = pd.Timestamp('09:00:00').time()
-        op_end_time = pd.Timestamp('17:15:00').time()
-
-        for _, row in weekday_df.iterrows():
-            day = row['手術実施日_dt'].date()
-            operation_start = datetime.combine(day, op_start_time)
-            operation_end = datetime.combine(day, op_end_time)
-
-            # 手術時間と稼働時間の重複部分を計算
-            actual_start = max(row[start_col], operation_start)
-            actual_end = min(row[end_col], operation_end)
+        try:
+            # 時刻データをdatetimeオブジェクトに変換 (エラーは無視)
+            weekday_df[start_col] = pd.to_datetime(weekday_df[start_col], errors='coerce', format='%H:%M')
+            weekday_df[end_col] = pd.to_datetime(weekday_df[end_col], errors='coerce', format='%H:%M')
+            weekday_df.dropna(subset=[start_col, end_col], inplace=True)
             
-            if actual_end > actual_start:
-                usage_minutes = (actual_end - actual_start).total_seconds() / 60
-                total_usage_minutes += usage_minutes
-        
-        # 利用可能な総時間を計算
-        num_operating_days = weekday_df['手術実施日_dt'].dt.date.nunique()
-        # 1日の稼働時間: 8時間15分 = 495分
-        # 手術室の数を仮に11部屋とする (必要に応じて調整)
-        num_rooms = 11 
-        total_available_minutes = num_operating_days * num_rooms * 495
+            if weekday_df.empty: raise ValueError("Valid time data not found after conversion.")
 
-        if total_available_minutes > 0:
-            return min((total_usage_minutes / total_available_minutes) * 100, 100.0)
+            overnight_mask = weekday_df[end_col] < weekday_df[start_col]
+            weekday_df.loc[overnight_mask, end_col] += pd.Timedelta(days=1)
+            
+            total_usage_minutes = 0
+            op_start_time = pd.Timestamp('09:00:00').time()
+            op_end_time = pd.Timestamp('17:15:00').time()
 
-    # --- 簡易計算ロジック (詳細データがない場合) ---
+            for _, row in weekday_df.iterrows():
+                day = row['手術実施日_dt'].date()
+                operation_start = datetime.combine(day, op_start_time)
+                operation_end = datetime.combine(day, op_end_time)
+                
+                actual_start = max(row[start_col], operation_start)
+                actual_end = min(row[end_col], operation_end)
+                
+                if actual_end > actual_start:
+                    total_usage_minutes += (actual_end - actual_start).total_seconds() / 60
+            
+            num_operating_days = weekday_df['手術実施日_dt'].dt.date.nunique()
+            # 1日の稼働時間: 8時間15分 = 495分
+            # 手術室の数を仮に11部屋とする (実績に合わせて調整が必要な場合あり)
+            num_rooms = 11 
+            total_available_minutes = num_operating_days * num_rooms * 495
+
+            if total_available_minutes > 0:
+                return min((total_usage_minutes / total_available_minutes) * 100, 100.0)
+        except Exception as e:
+            # 詳細計算でエラーが発生した場合は、簡易計算にフォールバックする
+            print(f"Detailed utilization calculation failed: {e}. Falling back to estimation.")
+            pass # Fallback to simplified calculation
+
+    # --- 簡易計算ロジック (詳細データがない場合、またはエラー時) ---
     total_weekday_cases = len(weekday_df)
     total_operating_days = weekday_df['手術実施日_dt'].nunique()
     if total_operating_days > 0:
