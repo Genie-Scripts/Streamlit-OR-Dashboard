@@ -8,28 +8,52 @@ from utils import date_helpers
 from analysis import weekly
 
 def _normalize_room_name(series):
-    """手術室名の表記を正規化（全角→半角、数字抽出、'OR'付与）する"""
+    """手術室名の表記を正規化（「ハート1」→「OR1」、「OP-1」→「OR1」など）"""
     if not pd.api.types.is_string_dtype(series):
         series = series.astype(str)
     
     def normalize_single_name(name):
         try:
-            # 全角文字を半角に変換
-            half_width_name = unicodedata.normalize('NFKC', str(name))
+            if pd.isna(name) or name == 'nan':
+                return None
+                
+            name_str = str(name).strip()
+            if not name_str:
+                return None
             
-            # 数字を抽出（「ハート1」→「1」、「心臓外1」→「1」など）
-            match = re.search(r'(\d+)', half_width_name)
-            if match:
-                room_num = int(match.group(1))
-                return f"OR{room_num}"
+            # 全角文字を半角に変換
+            half_width_name = unicodedata.normalize('NFKC', name_str)
+            
+            # パターン1: 数字を直接抽出（「ハート1」「OP-1」「オペ1」など）
+            # 連続する数字を抽出
+            numbers = re.findall(r'\d+', half_width_name)
+            
+            if numbers:
+                # 最初に見つかった数字を使用
+                room_num = int(numbers[0])
+                
+                # 有効な手術室番号の範囲チェック（1-12）
+                if 1 <= room_num <= 12:
+                    return f"OR{room_num}"
+            
+            # パターン2: 特定のキーワードが含まれている場合のみ処理
+            # 手術室を示すキーワード
+            or_keywords = ['ハート', 'オペ', 'OP', 'op', '手術室', '術室']
+            
+            # キーワードが含まれていない場合は除外
+            if not any(keyword in name_str for keyword in or_keywords):
+                return None
+                
             return None
-        except:
+            
+        except Exception as e:
+            print(f"手術室名正規化エラー: {name} -> {str(e)}")
             return None
     
     return series.apply(normalize_single_name)
 
 def _convert_to_datetime(time_series, date_series):
-    """時刻文字列をdatetimeオブジェクトに変換する"""
+    """時刻文字列・数値をdatetimeオブジェクトに変換する（Excel形式対応）"""
     try:
         result = pd.Series(pd.NaT, index=time_series.index)
         
@@ -37,24 +61,61 @@ def _convert_to_datetime(time_series, date_series):
             if pd.isna(time_series[idx]) or pd.isna(date_series[idx]):
                 continue
                 
-            time_str = str(time_series[idx]).strip()
+            time_value = time_series[idx]
             date_obj = date_series[idx]
             
-            # 時刻文字列をパース（HH:MM形式を想定）
             try:
+                # 数値形式（Excel時刻）の場合
+                if isinstance(time_value, (int, float)):
+                    # Excel時刻形式 (0-1の小数値)
+                    if 0 <= time_value <= 1:
+                        total_seconds = time_value * 24 * 3600
+                        hours = int(total_seconds // 3600)
+                        minutes = int((total_seconds % 3600) // 60)
+                        
+                        if 0 <= hours <= 23 and 0 <= minutes <= 59:
+                            if isinstance(date_obj, datetime):
+                                result[idx] = datetime.combine(date_obj.date(), time(hours, minutes))
+                            else:
+                                result[idx] = datetime.combine(date_obj, time(hours, minutes))
+                        continue
+                
+                # 文字列形式の場合
+                time_str = str(time_value).strip()
+                
+                # HH:MM形式
                 if ':' in time_str:
-                    hour, minute = map(int, time_str.split(':'))
+                    parts = time_str.split(':')
+                    if len(parts) >= 2:
+                        try:
+                            hour = int(parts[0])
+                            minute = int(parts[1])
+                            
+                            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                                if isinstance(date_obj, datetime):
+                                    result[idx] = datetime.combine(date_obj.date(), time(hour, minute))
+                                else:
+                                    result[idx] = datetime.combine(date_obj, time(hour, minute))
+                        except ValueError:
+                            continue
+                
+                # HHMM形式（4桁数字）
+                elif time_str.isdigit() and len(time_str) == 4:
+                    hour = int(time_str[:2])
+                    minute = int(time_str[2:])
+                    
                     if 0 <= hour <= 23 and 0 <= minute <= 59:
-                        # 日付と時刻を結合
                         if isinstance(date_obj, datetime):
                             result[idx] = datetime.combine(date_obj.date(), time(hour, minute))
                         else:
                             result[idx] = datetime.combine(date_obj, time(hour, minute))
-            except (ValueError, AttributeError):
+                
+            except (ValueError, AttributeError, TypeError):
                 continue
                 
         return result
-    except Exception:
+    except Exception as e:
+        print(f"時刻変換エラー: {str(e)}")
         return pd.Series(pd.NaT, index=time_series.index)
 
 def calculate_operating_room_utilization(df, period_df):
@@ -78,7 +139,7 @@ def calculate_operating_room_utilization(df, period_df):
         if weekday_df.empty:
             return 0.0
         
-        # 列名の特定（文字化けに対応）
+        # 列名の特定（文字化けに対応、インデックスベースも併用）
         possible_start_cols = ['入室時刻', '開始時刻', '入室時間']
         possible_end_cols = ['退室時刻', '終了時刻', '退室時間']
         possible_room_cols = ['実施手術室', '手術室', '手術室名']
@@ -87,7 +148,7 @@ def calculate_operating_room_utilization(df, period_df):
         end_col = None
         room_col = None
         
-        # 実際の列名から対応する列を特定
+        # 方法1: 列名による特定
         for col in weekday_df.columns:
             col_clean = str(col).strip()
             
@@ -121,6 +182,37 @@ def calculate_operating_room_utilization(df, period_df):
                             room_col = col
                             break
         
+        # 方法2: 列名による特定が失敗した場合、インデックスベースで特定
+        if not all([start_col, end_col, room_col]):
+            print("列名による特定が不完全です。インデックスベースで再試行...")
+            columns = list(weekday_df.columns)
+            
+            # インデックスベースでの推定（サンプルデータの構造を基に）
+            if len(columns) >= 12:  # 12列のデータと仮定
+                # 3列目: 手術室（インデックス2）
+                if not room_col and len(columns) > 2:
+                    test_col = columns[2]
+                    sample = weekday_df[test_col].dropna().head(5)
+                    if not sample.empty:
+                        room_col = test_col
+                        print(f"手術室列をインデックス2で特定: {test_col}")
+                
+                # 9列目: 入室時刻（インデックス8）
+                if not start_col and len(columns) > 8:
+                    test_col = columns[8]
+                    sample = weekday_df[test_col].dropna().head(5)
+                    if not sample.empty and any(':' in str(val) for val in sample):
+                        start_col = test_col
+                        print(f"入室時刻列をインデックス8で特定: {test_col}")
+                
+                # 10列目: 退室時刻（インデックス9）
+                if not end_col and len(columns) > 9:
+                    test_col = columns[9]
+                    sample = weekday_df[test_col].dropna().head(5)
+                    if not sample.empty and any(':' in str(val) for val in sample):
+                        end_col = test_col
+                        print(f"退室時刻列をインデックス9で特定: {test_col}")
+        
         print(f"特定された列: 入室={start_col}, 退室={end_col}, 手術室={room_col}")
         
         if not all([start_col, end_col, room_col]):
@@ -133,6 +225,21 @@ def calculate_operating_room_utilization(df, period_df):
         
         # 手術室名を正規化
         weekday_df['normalized_room'] = _normalize_room_name(weekday_df[room_col])
+        
+        # 正規化結果をデバッグ出力
+        print("=== 手術室名正規化結果の確認 ===")
+        original_rooms = weekday_df[room_col].value_counts().head(10)
+        print("元の手術室名（上位10件）:")
+        for room, count in original_rooms.items():
+            normalized = _normalize_room_name(pd.Series([room])).iloc[0]
+            print(f"  '{room}' -> '{normalized}' ({count}件)")
+        
+        normalized_rooms = weekday_df['normalized_room'].value_counts()
+        print(f"\n正規化後の手術室分布:")
+        for room, count in normalized_rooms.items():
+            if pd.notna(room):
+                print(f"  {room}: {count}件")
+        print(f"  NULL/不明: {weekday_df['normalized_room'].isna().sum()}件")
         
         # 対象手術室でフィルタリング
         filtered_df = weekday_df[weekday_df['normalized_room'].isin(target_rooms)].copy()
