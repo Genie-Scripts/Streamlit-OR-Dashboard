@@ -8,7 +8,7 @@ from utils import date_helpers
 from analysis import weekly
 
 def _normalize_room_name(series):
-    """手術室名の表記を正規化（「ハート1」→「OR1」、「OP-1」→「OR1」など）"""
+    """手術室名の表記を正規化（「ＯＰ－１」→「OR1」など）"""
     if not pd.api.types.is_string_dtype(series):
         series = series.astype(str)
     
@@ -24,26 +24,21 @@ def _normalize_room_name(series):
             # 全角文字を半角に変換
             half_width_name = unicodedata.normalize('NFKC', name_str)
             
-            # パターン1: 数字を直接抽出（「ハート1」「OP-1」「オペ1」など）
-            # 連続する数字を抽出
-            numbers = re.findall(r'\d+', half_width_name)
-            
-            if numbers:
-                # 最初に見つかった数字を使用
-                room_num = int(numbers[0])
+            # ＯＰ－数字 パターンをチェック
+            # 例: ＯＰ－１ → OR1, ＯＰ－１２ → OR12
+            op_pattern = re.match(r'[OＯ][PＰ][-－](\d+)([AＡBＢ]?)', half_width_name)
+            if op_pattern:
+                room_num = int(op_pattern.group(1))
+                suffix = op_pattern.group(2) if op_pattern.group(2) else ""
                 
                 # 有効な手術室番号の範囲チェック（1-12）
                 if 1 <= room_num <= 12:
+                    # OR11A, OR11Bは除外
+                    if room_num == 11:
+                        return None
                     return f"OR{room_num}"
             
-            # パターン2: 特定のキーワードが含まれている場合のみ処理
-            # 手術室を示すキーワード
-            or_keywords = ['ハート', 'オペ', 'OP', 'op', '手術室', '術室']
-            
-            # キーワードが含まれていない場合は除外
-            if not any(keyword in name_str for keyword in or_keywords):
-                return None
-                
+            # その他の手術室（心カテ、外手セ、アンギオ室など）は除外
             return None
             
         except Exception as e:
@@ -129,91 +124,55 @@ def calculate_operating_room_utilization(df, period_df):
     """
     try:
         if df.empty or period_df.empty:
+            print("データが空です")
             return 0.0
             
         # 平日のみを対象とする
         if 'is_weekday' not in period_df.columns:
+            print("is_weekday列がありません")
             return 0.0
             
         weekday_df = period_df[period_df['is_weekday']].copy()
         if weekday_df.empty:
+            print("平日データがありません")
             return 0.0
         
-        # 列名の特定（文字化けに対応、インデックスベースも併用）
-        possible_start_cols = ['入室時刻', '開始時刻', '入室時間']
-        possible_end_cols = ['退室時刻', '終了時刻', '退室時間']
-        possible_room_cols = ['実施手術室', '手術室', '手術室名']
+        print(f"対象データ数（平日のみ）: {len(weekday_df)}")
         
-        start_col = None
-        end_col = None
+        # 列名の特定（実際の列名を使用）
+        columns = list(weekday_df.columns)
+        print(f"利用可能な列: {columns}")
+        
+        # 実施手術室の列を特定
         room_col = None
+        for col in columns:
+            if '手術室' in str(col) or '実施手術室' in str(col):
+                room_col = col
+                break
         
-        # 方法1: 列名による特定
-        for col in weekday_df.columns:
-            col_clean = str(col).strip()
-            
-            # 入室時刻の列を特定
-            if not start_col:
-                for possible in possible_start_cols:
-                    if possible in col_clean or any(char in col_clean for char in ['入', '開始']):
-                        # 時刻データがあるかチェック
-                        sample = weekday_df[col].dropna().head(5)
-                        if not sample.empty and any(':' in str(val) for val in sample):
-                            start_col = col
-                            break
-            
-            # 退室時刻の列を特定
-            if not end_col:
-                for possible in possible_end_cols:
-                    if possible in col_clean or any(char in col_clean for char in ['退', '終了']):
-                        # 時刻データがあるかチェック
-                        sample = weekday_df[col].dropna().head(5)
-                        if not sample.empty and any(':' in str(val) for val in sample):
-                            end_col = col
-                            break
-            
-            # 手術室の列を特定
-            if not room_col:
-                for possible in possible_room_cols:
-                    if possible in col_clean or any(char in col_clean for char in ['室', '手術']):
-                        # 手術室データがあるかチェック
-                        sample = weekday_df[col].dropna().head(5)
-                        if not sample.empty:
-                            room_col = col
-                            break
+        # 入室時刻の列を特定
+        start_col = None
+        for col in columns:
+            if '入室' in str(col) and '時刻' in str(col):
+                start_col = col
+                break
         
-        # 方法2: 列名による特定が失敗した場合、インデックスベースで特定
-        if not all([start_col, end_col, room_col]):
-            print("列名による特定が不完全です。インデックスベースで再試行...")
-            columns = list(weekday_df.columns)
-            
-            # インデックスベースでの推定（サンプルデータの構造を基に）
-            if len(columns) >= 12:  # 12列のデータと仮定
-                # 3列目: 手術室（インデックス2）
-                if not room_col and len(columns) > 2:
-                    test_col = columns[2]
-                    sample = weekday_df[test_col].dropna().head(5)
-                    if not sample.empty:
-                        room_col = test_col
-                        print(f"手術室列をインデックス2で特定: {test_col}")
-                
-                # 9列目: 入室時刻（インデックス8）
-                if not start_col and len(columns) > 8:
-                    test_col = columns[8]
-                    sample = weekday_df[test_col].dropna().head(5)
-                    if not sample.empty and any(':' in str(val) for val in sample):
-                        start_col = test_col
-                        print(f"入室時刻列をインデックス8で特定: {test_col}")
-                
-                # 10列目: 退室時刻（インデックス9）
-                if not end_col and len(columns) > 9:
-                    test_col = columns[9]
-                    sample = weekday_df[test_col].dropna().head(5)
-                    if not sample.empty and any(':' in str(val) for val in sample):
-                        end_col = test_col
-                        print(f"退室時刻列をインデックス9で特定: {test_col}")
+        # 退室時刻の列を特定
+        end_col = None
+        for col in columns:
+            if '退室' in str(col) and '時刻' in str(col):
+                end_col = col
+                break
         
-        print(f"特定された列: 入室={start_col}, 退室={end_col}, 手術室={room_col}")
+        # インデックスベースでのフォールバック
+        if not room_col and len(columns) > 2:
+            room_col = columns[2]  # 3列目
+        if not start_col and len(columns) > 8:
+            start_col = columns[8]  # 9列目
+        if not end_col and len(columns) > 9:
+            end_col = columns[9]   # 10列目
+        
+        print(f"特定された列: 手術室={room_col}, 入室={start_col}, 退室={end_col}")
         
         if not all([start_col, end_col, room_col]):
             print("必要な列が特定できませんでした")
@@ -246,6 +205,7 @@ def calculate_operating_room_utilization(df, period_df):
         
         if filtered_df.empty:
             print("対象手術室でのデータが見つかりませんでした")
+            print("利用可能な正規化後手術室:", weekday_df['normalized_room'].dropna().unique())
             return 0.0
         
         print(f"対象データ件数: {len(filtered_df)}")
@@ -265,13 +225,17 @@ def calculate_operating_room_utilization(df, period_df):
         
         if valid_time_df.empty:
             print("有効な時刻データがありませんでした")
+            print(f"入室時刻サンプル: {filtered_df[start_col].head()}")
+            print(f"退室時刻サンプル: {filtered_df[end_col].head()}")
             return 0.0
         
         print(f"有効な時刻データ件数: {len(valid_time_df)}")
         
         # 終了時刻が開始時刻より早い場合（日をまたぐ）は翌日とする
         overnight_mask = valid_time_df['end_datetime'] < valid_time_df['start_datetime']
-        valid_time_df.loc[overnight_mask, 'end_datetime'] += timedelta(days=1)
+        if overnight_mask.any():
+            print(f"日をまたぐ手術: {overnight_mask.sum()}件")
+            valid_time_df.loc[overnight_mask, 'end_datetime'] += timedelta(days=1)
         
         # 稼働時間の計算
         operation_start_time = time(9, 0)   # 9:00
