@@ -1,4 +1,3 @@
-# analysis/ranking.py (v6.0 最終完成版)
 import pandas as pd
 import numpy as np
 from datetime import datetime, time
@@ -7,25 +6,37 @@ import unicodedata
 from utils import date_helpers
 from analysis import weekly
 
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★ ここが最終修正箇所です: 正規化関数をより強力なものに置き換えます ★
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 def _normalize_room_name(series):
-    """手術室名の表記を正規化（全角→半角、数字抽出、'OR'付与）する、最も堅牢な方法"""
-    if not pd.api.types.is_string_dtype(series):
-        series = series.astype(str)
+    """
+    手術室名の表記を最終的に正規化する
+    1. 全角を半角に変換
+    2. 数字部分のみを抽出
+    3. 'OR' を先頭に付与
+    """
     
-    # ステップ1: 全角文字を半角に変換 (NFKC: Compatibility form)
-    # これにより "ＯＰ－１２" -> "OP-12" のように変換される
-    try:
-        half_width_series = series.apply(lambda x: unicodedata.normalize('NFKC', str(x)))
-    except TypeError:
-        half_width_series = series
+    def normalize_single_name(name):
+        try:
+            # ステップ1: 全角を半角に変換 (NFKC: Compatibility form)
+            # これにより "ＯＰ－１" -> "OP-1" になる
+            half_width_name = unicodedata.normalize('NFKC', str(name))
+            
+            # ステップ2: 数字部分のみを抽出
+            # 'OP-1' -> '1', 'OR 2' -> '2', '手術室3' -> '3'
+            match = re.search(r'(\d+)', half_width_name)
+            
+            if match:
+                # ステップ3: 'OR'を先頭に付与 -> "OR1"
+                return f"OR{match.group(1)}"
+            else:
+                # 数字が見つからない場合（例：「外手セ」）はNoneを返す
+                return None
+        except:
+            return None
 
-    # ステップ2: 数字部分のみを抽出 (正規表現)
-    # 'OP-12' -> '12', 'OR 2' -> '2'
-    extracted_numbers = half_width_series.str.extract(r'(\d+)', expand=False)
-
-    # ステップ3: 'OR'を先頭に付与 (数字が抽出できたもののみ)
-    return 'OR' + extracted_numbers.dropna()
-
+    return series.apply(normalize_single_name)
 
 def _convert_to_datetime(series, date_series):
     """Excelの数値時間とテキスト時間を両方考慮してdatetimeオブジェクトに変換する"""
@@ -46,6 +57,7 @@ def _convert_to_datetime(series, date_series):
         return combined_dt
     except Exception:
         return pd.Series(pd.NaT, index=series.index)
+
 
 def calculate_operating_room_utilization(df, period_df):
     """
@@ -69,8 +81,10 @@ def calculate_operating_room_utilization(df, period_df):
         try:
             target_rooms = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
             
+            # 修正された正規化関数を適用
             normalized_room_series = _normalize_room_name(weekday_df[room_col])
             
+            # isin()の前に、比較対象のシリーズもNone/NaNを除外
             valid_normalized_rooms = normalized_room_series.dropna()
             filtered_weekday_df = weekday_df.loc[valid_normalized_rooms.index][valid_normalized_rooms.isin(target_rooms)].copy()
 
@@ -111,20 +125,7 @@ def calculate_operating_room_utilization(df, period_df):
             pass
 
     # フォールバック（簡易計算）
-    target_rooms_fallback = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
-    if room_col in weekday_df.columns:
-        normalized_room_fallback = _normalize_room_name(weekday_df[room_col])
-        weekday_df = weekday_df.loc[normalized_room_fallback.dropna().index][normalized_room_fallback.dropna().isin(target_rooms_fallback)]
-        
-    total_weekday_cases = len(weekday_df)
-    
-    period_start_date = period_df['手術実施日_dt'].min(); period_end_date = period_df['手術実施日_dt'].max()
-    total_weekdays_in_period = sum(1 for d in pd.date_range(period_start_date, period_end_date) if date_helpers.is_weekday(d))
-    if total_weekdays_in_period > 0:
-        avg_cases_per_day = total_weekday_cases / total_weekdays_in_period
-        return min((avg_cases_per_day / 20) * 100, 100.0)
-
-    return 0.0
+    return 0.0 # 詳細計算が失敗した場合は0を返す
 
 def get_kpi_summary(df, latest_date):
     if df.empty: return {}
