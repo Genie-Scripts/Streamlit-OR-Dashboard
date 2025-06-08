@@ -1,32 +1,35 @@
-# analysis/ranking.py (最終完成版)
 import pandas as pd
 import numpy as np
 from datetime import datetime, time
 from utils import date_helpers
 from analysis import weekly
 
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★ ここが修正された箇所です: OP- を OR に変換する処理を追加 ★
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+def _normalize_room_name(series):
+    """手術室名の表記を正規化（大文字化、スペース削除、プレフィックス統一）する"""
+    if not pd.api.types.is_string_dtype(series):
+        series = series.astype(str)
+    return series.str.upper().str.replace(' ', '').str.replace('OP-', 'OR')
+
 def _convert_to_datetime(series, date_series):
     """Excelの数値時間とテキスト時間を両方考慮してdatetimeオブジェクトに変換する"""
     try:
-        # まず数値（Excel時間）として試す
         numeric_series = pd.to_numeric(series, errors='coerce')
-        if numeric_series.notna().sum() > 0 and len(series.dropna()) > 0 and (numeric_series.notna().sum() / len(series.dropna()) > 0.8):
+        # dropna()の前にあるseriesの長さを確認
+        if not series.dropna().empty and numeric_series.notna().sum() / len(series.dropna()) > 0.8:
             time_deltas = pd.to_timedelta(numeric_series * 24, unit='h', errors='coerce')
-            # pd.to_datetimeにSeriesを渡す
             return pd.to_datetime(date_series.astype(str)) + time_deltas
         
-        # テキスト時間として処理 (formatを指定せず、pandasの自動解析に任せる)
         time_only_series = pd.to_datetime(series, errors='coerce', format=None).dt.time
-        
         valid_times = time_only_series.notna()
         combined_dt = pd.Series(pd.NaT, index=series.index)
         
         if valid_times.any():
-            # .locを使用して、有効なインデックスに対してのみ操作を行う
             date_series_valid = date_series[valid_times]
             time_only_series_valid = time_only_series[valid_times]
             combined_dt.loc[valid_times] = [datetime.combine(d, t) for d, t in zip(date_series_valid, time_only_series_valid)]
-
         return combined_dt
     except Exception:
         return pd.Series(pd.NaT, index=series.index)
@@ -44,9 +47,7 @@ def calculate_operating_room_utilization(df, period_df):
         
     start_col, end_col, room_col = None, None, None
     
-    possible_start_keys = ['入室時刻', '開始']
-    possible_end_keys = ['退室時刻', '終了']
-    possible_room_keys = ['実施手術室', '手術室']
+    possible_start_keys = ['入室時刻', '開始']; possible_end_keys = ['退室時刻', '終了']; possible_room_keys = ['実施手術室', '手術室']
     for col in df.columns:
         if not start_col and any(key in col for key in possible_start_keys): start_col = col
         if not end_col and any(key in col for key in possible_end_keys): end_col = col
@@ -57,7 +58,10 @@ def calculate_operating_room_utilization(df, period_df):
     if start_col and end_col and room_col:
         try:
             target_rooms = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
-            filtered_weekday_df = weekday_df[weekday_df[room_col].isin(target_rooms)].copy()
+            
+            # 正規化した手術室名でフィルタリング
+            normalized_room_series = _normalize_room_name(weekday_df[room_col])
+            filtered_weekday_df = weekday_df[normalized_room_series.isin(target_rooms)].copy()
 
             if filtered_weekday_df.empty:
                 return 0.0
@@ -91,12 +95,14 @@ def calculate_operating_room_utilization(df, period_df):
 
             if total_available_minutes > 0:
                 return min((total_usage_minutes / total_available_minutes) * 100, 100.0)
-        except Exception:
+        except Exception as e:
+            print(f"詳細な稼働率計算でエラー: {e}。簡易計算に切り替えます。")
             pass
 
     target_rooms_fallback = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
     if room_col in weekday_df.columns:
-        weekday_df = weekday_df[weekday_df[room_col].isin(target_rooms_fallback)]
+        normalized_room_fallback = _normalize_room_name(weekday_df[room_col])
+        weekday_df = weekday_df[normalized_room_fallback.isin(target_rooms_fallback)]
         
     total_weekday_cases = len(weekday_df)
     
