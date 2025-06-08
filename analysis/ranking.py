@@ -1,28 +1,37 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, time
+import re # 正規表現モジュールをインポート
 from utils import date_helpers
 from analysis import weekly
 
 # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★ ここが修正された箇所です: OP- を OR に変換する処理を追加 ★
+# ★ ここが最終修正箇所です: 正規表現を使い、より強力な正規化処理に変更 ★
 # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 def _normalize_room_name(series):
-    """手術室名の表記を正規化（大文字化、スペース削除、プレフィックス統一）する"""
+    """手術室名の表記を正規化（数字部分を抽出し'OR'を付与）する"""
     if not pd.api.types.is_string_dtype(series):
         series = series.astype(str)
-    return series.str.upper().str.replace(' ', '').str.replace('OP-', 'OR')
+    
+    # 正規表現 r'(\d+)' を使って、文字列から連続した数字部分を抽出
+    extracted_numbers = series.str.extract(r'(\d+)', expand=False).dropna()
+    
+    # 抽出できた数字の前に 'OR' を結合して、新しい列を返す
+    return 'OR' + extracted_numbers
 
 def _convert_to_datetime(series, date_series):
     """Excelの数値時間とテキスト時間を両方考慮してdatetimeオブジェクトに変換する"""
     try:
+        # まず数値（Excel時間）として試す
         numeric_series = pd.to_numeric(series, errors='coerce')
         # dropna()の前にあるseriesの長さを確認
         if not series.dropna().empty and numeric_series.notna().sum() / len(series.dropna()) > 0.8:
             time_deltas = pd.to_timedelta(numeric_series * 24, unit='h', errors='coerce')
             return pd.to_datetime(date_series.astype(str)) + time_deltas
         
+        # テキスト時間として処理 (formatを指定せず、pandasの自動解析に任せる)
         time_only_series = pd.to_datetime(series, errors='coerce', format=None).dt.time
+        
         valid_times = time_only_series.notna()
         combined_dt = pd.Series(pd.NaT, index=series.index)
         
