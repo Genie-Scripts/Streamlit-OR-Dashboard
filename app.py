@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import traceback
-from datetime import datetime
+from datetime import datetime, time # timeを追加
 import pytz
 import plotly.express as px
 
@@ -12,6 +12,7 @@ from analysis import weekly, periodic, ranking, surgeon, forecasting
 from plotting import trend_plots, generic_plots
 from reporting import csv_exporter, pdf_exporter
 from utils import date_helpers
+from analysis import weekly
 
 # --- ページ設定とCSS (最初に一度だけ) ---
 st.set_page_config(
@@ -26,6 +27,22 @@ def initialize_session_state():
     if 'latest_date' not in st.session_state: st.session_state['latest_date'] = None
     if 'current_view' not in st.session_state: st.session_state['current_view'] = 'ダッシュボード'
 
+def _debug_convert_to_datetime(series, date):
+    """[デバッグ用] Excelの数値時間とテキスト時間を両方考慮してdatetimeオブジェクトに変換する"""
+    try:
+        # まず数値（Excel時間）として試す
+        numeric_series = pd.to_numeric(series, errors='coerce')
+        if numeric_series.notna().sum() / len(series.dropna()) > 0.8:
+            time_deltas = pd.to_timedelta(numeric_series * 24, unit='h', errors='coerce')
+            return pd.to_datetime(date) + time_deltas
+        
+        # テキスト時間として処理
+        time_series = pd.to_datetime(series, errors='coerce', format=None).dt.time
+        return pd.Series([datetime.combine(d, t) if pd.notna(d) and pd.notna(t) else pd.NaT 
+                          for d, t in zip(date, time_series)], index=series.index)
+    except Exception as e:
+        return f"変換エラー: {e}"
+        
 # --- UI描画関数 ---
 def render_sidebar():
     with st.sidebar:
@@ -106,7 +123,9 @@ def render_dashboard_page(df, target_dict, latest_date):
     else: st.info("目標データをアップロードするとランキングが表示されます。")
 
 def render_hospital_page(df, target_dict, latest_date):
+    """病院全体分析ページ (デバッグ機能付き)"""
     st.title("🏥 病院全体分析 (完全週データ)")
+
     
     analysis_end_sunday = weekly.get_analysis_end_date(latest_date)
     if analysis_end_sunday is None:
@@ -125,6 +144,57 @@ def render_hospital_page(df, target_dict, latest_date):
     st.caption(f"💡 最新データが{latest_date.strftime('%A')}のため、分析精度向上のため前の日曜日({analysis_end_sunday.strftime('%Y/%m/%d')})までを分析対象としています。")
     st.markdown("---")
     
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # ★ ここにデバッグ機能を追加しました ★
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    with st.expander("🔬 稼働率計算のデバッグ情報"):
+        st.write("「手術室稼働率」の数値が変わらない場合、以下の情報を確認してください。")
+        
+        # --- チェック1: 列名の検出 ---
+        st.subheader("1. 列名の検出チェック")
+        start_col, end_col, room_col = None, None, None
+        possible_start_keys = ['入室時刻', '開始']
+        possible_end_keys = ['退室時刻', '終了']
+        possible_room_keys = ['実施手術室', '手術室']
+
+        for col in df.columns:
+            if not start_col and any(key in col for key in possible_start_keys): start_col = col
+            if not end_col and any(key in col for key in possible_end_keys): end_col = col
+            if not room_col and any(key in col for key in possible_room_keys): room_col = col
+            if not start_col and 'üº' in col: start_col = col
+            if not end_col and 'Þº' in col: end_col = col
+
+        if start_col: st.success(f"✅ 開始時刻の列が見つかりました: `{start_col}`")
+        else: st.error("❌ 開始時刻の列が見つかりませんでした。['入室時刻', '開始']を含む列名が必要です。")
+
+        if end_col: st.success(f"✅ 終了時刻の列が見つかりました: `{end_col}`")
+        else: st.error("❌ 終了時刻の列が見つかりませんでした。['退室時刻', '終了']を含む列名が必要です。")
+
+        if room_col: st.success(f"✅ 手術室の列が見つかりました: `{room_col}`")
+        else: st.error("❌ 手術室の列が見つかりませんでした。['実施手術室', '手術室']を含む列名が必要です。")
+
+        # --- チェック2: 時刻データの形式 ---
+        if start_col and end_col:
+            st.subheader("2. 時刻データの形式チェック")
+            st.write("データの先頭5件の時刻が正しく日時に変換されるかテストします。")
+            
+            sample_df = df.dropna(subset=[start_col, end_col]).head(5)
+            
+            st.write("**元のデータ:**")
+            st.dataframe(sample_df[['手術実施日', start_col, end_col]])
+
+            st.write("**変換後のデータ:**")
+            sample_df['start_datetime_debug'] = _debug_convert_to_datetime(sample_df[start_col], sample_df['手術実施日_dt'].dt.date)
+            sample_df['end_datetime_debug'] = _debug_convert_to_datetime(sample_df[end_col], sample_df['手術実施日_dt'].dt.date)
+            st.dataframe(sample_df[['start_datetime_debug', 'end_datetime_debug']])
+            
+            if sample_df['start_datetime_debug'].isna().any() or sample_df['end_datetime_debug'].isna().any():
+                st.error("❌ 時刻データの変換に失敗しているようです。`NaT`は「Not a Time」の略で、変換できなかったことを示します。")
+            else:
+                st.success("✅ 時刻データは正しく日時に変換できています。")
+
+    st.markdown("---")
+
     st.subheader("📊 診療科別パフォーマンスダッシュボード（直近4週データ分析）")
     four_weeks_ago = analysis_end_sunday - pd.Timedelta(days=27)
     st.caption(f"🗓️ 分析対象期間: {four_weeks_ago.strftime('%Y/%m/%d')} ~ {analysis_end_sunday.strftime('%Y/%m/%d')}")
