@@ -42,7 +42,7 @@ def render_sidebar():
         if st.session_state.get('target_dict'): st.success("🎯 目標データ設定済み")
         else: st.info("目標データ未設定")
         st.markdown("---")
-        st.info("Version: 5.3 (Type Fix)")
+        st.info("Version: 5.3 (Display Fix)")
         jst = pytz.timezone('Asia/Tokyo')
         st.write(f"現在時刻: {datetime.now(jst).strftime('%H:%M:%S')}")
 
@@ -69,6 +69,7 @@ def render_page_content():
 
 def render_upload_page():
     st.header("📤 データアップロード")
+    # ... (変更なし) ...
     base_file = st.file_uploader("基礎データ (CSV)", type="csv")
     update_files = st.file_uploader("追加データ (CSV)", type="csv", accept_multiple_files=True)
     target_file = st.file_uploader("目標データ (CSV)", type="csv")
@@ -105,7 +106,6 @@ def render_dashboard_page(df, target_dict, latest_date):
             st.plotly_chart(fig_rank, use_container_width=True)
     else: st.info("目標データをアップロードするとランキングが表示されます。")
 
-
 def render_hospital_page(df, target_dict, latest_date):
     st.title("🏥 病院全体分析 (完全週データ)")
     
@@ -117,12 +117,18 @@ def render_hospital_page(df, target_dict, latest_date):
     df_complete_weeks = df[df['手術実施日_dt'] <= analysis_end_sunday]
     total_records = len(df_complete_weeks)
     
-    # ...(ヘッダーのメトリック表示は変更なし)...
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: st.metric("📊 総レコード数", f"{total_records:,}件")
+    with col2: st.metric("📅 最新データ日", latest_date.strftime('%Y/%m/%d'))
+    with col3: st.metric("🎯 分析終了日", analysis_end_sunday.strftime('%Y/%m/%d'))
+    with col4: st.metric("⚠️ 除外日数", f"{excluded_days}日")
     
+    st.caption(f"💡 最新データが{latest_date.strftime('%A')}のため、分析精度向上のため前の日曜日({analysis_end_sunday.strftime('%Y/%m/%d')})までを分析対象としています。")
     st.markdown("---")
     
     st.subheader("📊 診療科別パフォーマンスダッシュボード（直近4週データ分析）")
-    # ...(分析期間の表示は変更なし)...
+    four_weeks_ago = analysis_end_sunday - pd.Timedelta(days=27)
+    st.caption(f"🗓️ 分析対象期間: {four_weeks_ago.strftime('%Y/%m/%d')} ~ {analysis_end_sunday.strftime('%Y/%m/%d')}")
 
     perf_summary = ranking.get_department_performance_summary(df, target_dict, latest_date)
 
@@ -138,20 +144,20 @@ def render_hospital_page(df, target_dict, latest_date):
                 return "#dc3545"
 
             cols = st.columns(3)
-            for i, row_tuple in enumerate(sorted_perf.itertuples(index=False)):
+            # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+            # ★ ここが修正された箇所です: itertuples() から iterrows() に変更 ★
+            # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+            for i, row in enumerate(sorted_perf.itertuples()):
                 with cols[i % 3]:
-                    # itertuplesの行を辞書に変換して、元の列名（文字列）で安全に値を取得
-                    row = row_tuple._asdict()
-
-                    rate = row.get(rate_col_name, 0)
+                    # 各列の値を安全に取得
+                    rate = getattr(row, rate_col_name.replace('%','').replace('(','').replace(')',''), 0)
                     color = get_color_for_rate(rate)
                     bar_width = min(rate, 100)
                     
-                    # .get()メソッドで安全に値を取得
-                    dept_name = row.get("診療科", "N/A")
-                    avg_4_weeks = row.get("4週平均", 0)
-                    latest_cases = row.get("直近週実績", 0)
-                    target_val = row.get("週次目標", 0)
+                    dept_name = getattr(row, "診療科", "N/A")
+                    avg_4_weeks = getattr(row, "4週平均", 0)
+                    latest_cases = getattr(row, "直近週実績", 0)
+                    target_val = getattr(row, "週次目標", 0)
 
                     html = f"""
                     <div style="background-color: {color}1A; border-left: 5px solid {color}; padding: 12px; border-radius: 5px; margin-bottom: 12px; height: 165px;">
