@@ -251,3 +251,14 @@ def render_prediction_page(df, target_dict, latest_date):
         st.header("将来予測")
     with tab2:
         st.header("予測モデルの精度検証")
+    with tab3:
+        st.header("パラメータ最適化 (Holt-Winters)")
+
+# --- メイン実行部 ---
+def main():
+    initialize_session_state()
+    render_sidebar()
+    render_page_content()
+
+if __name__ == "__main__":
+    main()
