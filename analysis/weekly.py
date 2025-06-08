@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 
-def _get_analysis_end_date(latest_date):
+def get_analysis_end_date(latest_date):
     """分析の最終日（最新の完全な週の最終日曜日）を計算する"""
     if pd.isna(latest_date):
         return None
@@ -27,17 +27,15 @@ def get_summary(df, department=None, use_complete_weeks=True):
 
     if use_complete_weeks:
         latest_date = df['手術実施日_dt'].max()
-        analysis_end_date = _get_analysis_end_date(latest_date)
+        analysis_end_date = get_analysis_end_date(latest_date)
         if analysis_end_date:
             target_df = target_df[target_df['手術実施日_dt'] <= analysis_end_date]
     
     if target_df.empty:
         return pd.DataFrame()
 
-    # 週ごとの件数
     weekly_counts = target_df.groupby('week_start').size().reset_index(name='週合計件数')
     
-    # 週ごとの平日件数と実際に手術があった平日日数
     weekday_df = target_df[target_df['is_weekday']]
     if not weekday_df.empty:
         weekly_weekday_counts = weekday_df.groupby('week_start').size().reset_index(name='平日件数')
@@ -59,6 +57,3 @@ def get_summary(df, department=None, use_complete_weeks=True):
     ).round(1)
 
     return summary.rename(columns={'week_start': '週'})[['週', '週合計件数', '平日件数', '実データ平日数', '平日1日平均件数']]
-
-# app.pyから呼び出せるように、_get_analysis_end_dateをweeklyモジュールのトップレベルに配置
-_get_complete_week_filter.get_end_date = _get_analysis_end_date

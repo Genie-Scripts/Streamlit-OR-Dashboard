@@ -1,4 +1,4 @@
-# app.py (v4.6 デザイン最終版)
+# app.py (v4.7 エラー修正版)
 import streamlit as st
 import pandas as pd
 import traceback
@@ -43,7 +43,7 @@ def render_sidebar():
         if st.session_state.get('target_dict'): st.success("🎯 目標データ設定済み")
         else: st.info("目標データ未設定")
         st.markdown("---")
-        st.info("Version: 4.6 (Final Design)")
+        st.info("Version: 4.7 (Fixed)")
         jst = pytz.timezone('Asia/Tokyo')
         st.write(f"現在時刻: {datetime.now(jst).strftime('%H:%M:%S')}")
 
@@ -106,51 +106,44 @@ def render_dashboard_page(df, target_dict, latest_date):
             st.plotly_chart(fig_rank, use_container_width=True)
     else: st.info("目標データをアップロードするとランキングが表示されます。")
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★ ここがご要望のデザインに修正された関数です ★
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 def render_hospital_page(df, target_dict, latest_date):
     """病院全体分析ページ (スクリーンショットのデザインを完全に再現)"""
     st.title("🏥 病院全体分析 (完全週データ)")
     
     # --- ヘッダー情報の計算と表示 ---
-    analysis_end_sunday = weekly._get_complete_week_filter.get_end_date(latest_date)
-    excluded_days = (latest_date - analysis_end_sunday).days if analysis_end_sunday else 0
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # ★ ここが修正された箇所です ★
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    analysis_end_sunday = weekly.get_analysis_end_date(latest_date)
+    if analysis_end_sunday is None:
+        st.warning("分析可能な日付データがありません。")
+        return
+        
+    excluded_days = (latest_date - analysis_end_sunday).days
     
-    # フィルタをかけた後の全データで総レコード数を計算
     df_complete_weeks = df[df['手術実施日_dt'] <= analysis_end_sunday]
     total_records = len(df_complete_weeks)
     
     col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("📊 総レコード数", f"{total_records:,}件")
-    with col2:
-        st.metric("📅 最新データ日", latest_date.strftime('%Y/%m/%d'))
-    with col3:
-        st.metric("🎯 分析終了日", analysis_end_sunday.strftime('%Y/%m/%d'))
-    with col4:
-        st.metric("⚠️ 除外日数", f"{excluded_days}日")
+    with col1: st.metric("📊 総レコード数", f"{total_records:,}件")
+    with col2: st.metric("📅 最新データ日", latest_date.strftime('%Y/%m/%d'))
+    with col3: st.metric("🎯 分析終了日", analysis_end_sunday.strftime('%Y/%m/%d'))
+    with col4: st.metric("⚠️ 除外日数", f"{excluded_days}日")
     
     st.caption(f"💡 最新データが{latest_date.strftime('%A')}のため、分析精度向上のため前の日曜日({analysis_end_sunday.strftime('%Y/%m/%d')})までを分析対象としています。")
-    
     st.markdown("---")
     
     # --- 診療科パフォーマンスダッシュボード ---
     st.subheader("📊 診療科別パフォーマンスダッシュボード（直近4週データ分析）")
-    
-    # 期間を明記
     four_weeks_ago = analysis_end_sunday - pd.Timedelta(weeks=4) + pd.Timedelta(days=1)
     st.caption(f"🗓️ 分析対象期間: {four_weeks_ago.strftime('%Y/%m/%d')} ~ {analysis_end_sunday.strftime('%Y/%m/%d')}")
-
     perf_summary = ranking.get_department_performance_summary(df, target_dict, latest_date)
-
     if not perf_summary.empty:
+        # ... (以降のUIロジックは変更なし)
         def get_color_for_rate(rate):
-            if rate >= 100: return "#28a745"  # Green
-            if rate >= 80: return "#ffc107"  # Yellow/Orange
-            return "#dc3545"  # Red
-
-        # 達成率でソートしたデータで表示
+            if rate >= 100: return "#28a745"
+            if rate >= 80: return "#ffc107"
+            return "#dc3545"
         sorted_perf = perf_summary.sort_values("達成率(%)", ascending=False)
         cols = st.columns(3)
         for i, row in enumerate(sorted_perf.itertuples()):
@@ -158,7 +151,6 @@ def render_hospital_page(df, target_dict, latest_date):
                 rate = row.達成率
                 color = get_color_for_rate(rate)
                 bar_width = min(rate, 100)
-
                 html = f"""
                 <div style="background-color: {color}1A; border-left: 5px solid {color}; padding: 12px; border-radius: 5px; margin-bottom: 12px; height: 165px;">
                     <h5 style="margin: 0 0 10px 0; font-weight: bold; color: #333;">{row.診療科}</h5>
@@ -174,25 +166,19 @@ def render_hospital_page(df, target_dict, latest_date):
                 </div>
                 """
                 st.markdown(html, unsafe_allow_html=True)
-        
-        with st.expander("詳細データテーブル"):
-            st.dataframe(sorted_perf)
-    else:
-        st.info("診療科別パフォーマンスを計算する十分なデータがありません。")
-
+        with st.expander("詳細データテーブル"): st.dataframe(sorted_perf)
+    else: st.info("診療科別パフォーマンスを計算する十分なデータがありません。")
     st.markdown("---")
     
     # --- 全体トレンドグラフ ---
     st.subheader("📈 全身麻酔手術件数 週次推移（完全週データ）")
     summary = weekly.get_summary(df, use_complete_weeks=True)
     if not summary.empty:
-        fig = trend_plots.create_weekly_summary_chart(summary, "", target_dict) # タイトルはヘッダーにあるので空に
+        fig = trend_plots.create_weekly_summary_chart(summary, "", target_dict)
         st.plotly_chart(fig, use_container_width=True)
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-
+# ... 他ページのrender関数 (変更なし) ...
 def render_department_page(df, target_dict, latest_date):
-    # (この関数は変更なし)
     st.title("🩺 診療科別分析")
     departments = sorted(df["実施診療科"].dropna().unique())
     if not departments: st.warning("データに診療科情報がありません。"); return
@@ -233,9 +219,7 @@ def render_department_page(df, target_dict, latest_date):
             if not cum_data.empty: st.plotly_chart(generic_plots.plot_cumulative_cases_chart(cum_data, f"{selected_dept} 累積実績"), use_container_width=True)
         else: st.info("この診療科の目標値が設定されていないため、累積目標は表示できません。")
 
-
 def render_surgeon_page(df, target_dict, latest_date):
-    # (この関数は変更なし)
     st.title("👨‍⚕️ 術者分析")
     analysis_type = st.radio("分析タイプ", ["診療科別ランキング", "術者ごと時系列"], horizontal=True)
     with st.spinner("術者データを準備中..."):
@@ -261,24 +245,9 @@ def render_surgeon_page(df, target_dict, latest_date):
             st.plotly_chart(fig, use_container_width=True)
 
 def render_prediction_page(df, target_dict, latest_date):
-    # (この関数は変更なし)
     st.title("🔮 将来予測")
     tab1, tab2, tab3 = st.tabs(["将来予測", "モデル検証", "パラメータ最適化"])
     with tab1:
         st.header("将来予測")
-        # ...(実装は省略)...
     with tab2:
         st.header("予測モデルの精度検証")
-        # ...(実装は省略)...
-    with tab3:
-        st.header("パラメータ最適化 (Holt-Winters)")
-        # ...(実装は省略)...
-
-# --- メイン実行部 ---
-def main():
-    initialize_session_state()
-    render_sidebar()
-    render_page_content()
-
-if __name__ == "__main__":
-    main()
