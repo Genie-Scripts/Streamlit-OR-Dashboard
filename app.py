@@ -1,4 +1,3 @@
-# app.py (v5.1 デバッグ強化版)
 import streamlit as st
 import pandas as pd
 import traceback
@@ -43,7 +42,7 @@ def render_sidebar():
         if st.session_state.get('target_dict'): st.success("🎯 目標データ設定済み")
         else: st.info("目標データ未設定")
         st.markdown("---")
-        st.info("Version: 5.1 (Debug Enhanced)")
+        st.info("Version: 5.2 (Attribute Fix)")
         jst = pytz.timezone('Asia/Tokyo')
         st.write(f"現在時刻: {datetime.now(jst).strftime('%H:%M:%S')}")
 
@@ -108,7 +107,6 @@ def render_dashboard_page(df, target_dict, latest_date):
 
 
 def render_hospital_page(df, target_dict, latest_date):
-    """病院全体分析ページ (列名エラーを吸収するロジックを強化)"""
     st.title("🏥 病院全体分析 (完全週データ)")
     
     analysis_end_sunday = weekly.get_analysis_end_date(latest_date)
@@ -129,57 +127,54 @@ def render_hospital_page(df, target_dict, latest_date):
     perf_summary = ranking.get_department_performance_summary(df, target_dict, latest_date)
 
     if not perf_summary.empty:
+        rate_col_name = '達成率(%)' if '達成率(%)' in perf_summary.columns else '達成率'
 
-        # デバッグのために、まず実際の列名を出力
-        st.info(f"デバッグ情報: パフォーマンスデータの列名 -> {perf_summary.columns.to_list()}")
-
-        # 処理のために、安全な列名を定義
-        ACHIEVEMENT_RATE_COL = "achievement_rate_temp"
-        
-        # '達成率(%)' または '達成率' のどちらかの列を、安全な列名に変更する
-        if '達成率(%)' in perf_summary.columns:
-            perf_summary[ACHIEVEMENT_RATE_COL] = perf_summary['達成率(%)']
-        elif '達成率' in perf_summary.columns:
-            perf_summary[ACHIEVEMENT_RATE_COL] = perf_summary['達成率']
-        else:
-            st.error("達成率の列がデータに含まれていません。処理を中断します。")
-            return # これ以上進めないのでここで終了
-
-        # 安全な列名でソート
-        sorted_perf = perf_summary.sort_values(ACHIEVEMENT_RATE_COL, ascending=False)
+        if rate_col_name in perf_summary.columns:
+            sorted_perf = perf_summary.sort_values(rate_col_name, ascending=False)
             
-        def get_color_for_rate(rate):
-            if rate >= 100: return "#28a745"
-            if rate >= 80: return "#ffc107"
-            return "#dc3545"
+            def get_color_for_rate(rate):
+                if rate >= 100: return "#28a745"
+                if rate >= 80: return "#ffc107"
+                return "#dc3545"
 
-        cols = st.columns(3)
-        for i, row in enumerate(sorted_perf.itertuples(index=False)):
-            with cols[i % 3]:
-                # 安全な列名で値を取得
-                rate = getattr(row, ACHIEVEMENT_RATE_COL)
-                color = get_color_for_rate(rate)
-                bar_width = min(rate, 100)
-                
-                # ... (以降のHTML生成ロジックは変更なし) ...
-                html = f"""
-                <div style="background-color: {color}1A; border-left: 5px solid {color}; padding: 12px; border-radius: 5px; margin-bottom: 12px; height: 165px;">
-                    <h5 style="margin: 0 0 10px 0; font-weight: bold; color: #333;">{row.診療科}</h5>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.9em;"><span>4週平均:</span><span style="font-weight: bold;">{getattr(row, '_4週平均'):.1f} 件</span></div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.9em;"><span>直近週実績:</span><span style="font-weight: bold;">{row.直近週実績:.0f} 件</span></div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #666;"><span>目標:</span><span>{row.週次目標:.1f} 件</span></div>
-                    <div style="display: flex; justify-content: space-between; font-size: 1.1em; color: {color}; margin-top: 5px;">
-                        <span style="font-weight: bold;">達成率:</span><span style="font-weight: bold;">{rate:.1f}%</span>
+            cols = st.columns(3)
+            # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+            # ★ ここが修正された箇所です ★
+            # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+            for i, row_tuple in enumerate(sorted_perf.itertuples(index=False)):
+                with cols[i % 3]:
+                    # itertuplesの行を辞書に変換して、元の列名（文字列）で安全に値を取得
+                    row = row_tuple._asdict()
+
+                    rate = row.get(rate_col_name, 0)
+                    color = get_color_for_rate(rate)
+                    bar_width = min(rate, 100)
+                    
+                    # .get()メソッドで安全に値を取得
+                    dept_name = row.get("診療科", "N/A")
+                    avg_4_weeks = row.get("4週平均", 0)
+                    latest_cases = row.get("直近週実績", 0)
+                    target_val = row.get("週次目標", 0)
+
+                    html = f"""
+                    <div style="background-color: {color}1A; border-left: 5px solid {color}; padding: 12px; border-radius: 5px; margin-bottom: 12px; height: 165px;">
+                        <h5 style="margin: 0 0 10px 0; font-weight: bold; color: #333;">{dept_name}</h5>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9em;"><span>4週平均:</span><span style="font-weight: bold;">{avg_4_weeks:.1f} 件</span></div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9em;"><span>直近週実績:</span><span style="font-weight: bold;">{latest_cases:.0f} 件</span></div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #666;"><span>目標:</span><span>{target_val:.1f} 件</span></div>
+                        <div style="display: flex; justify-content: space-between; font-size: 1.1em; color: {color}; margin-top: 5px;">
+                            <span style="font-weight: bold;">達成率:</span><span style="font-weight: bold;">{rate:.1f}%</span>
+                        </div>
+                        <div style="background-color: #e9ecef; border-radius: 5px; height: 6px; margin-top: 5px;">
+                            <div style="width: {bar_width}%; background-color: {color}; height: 6px; border-radius: 5px;"></div>
+                        </div>
                     </div>
-                    <div style="background-color: #e9ecef; border-radius: 5px; height: 6px; margin-top: 5px;">
-                        <div style="width: {bar_width}%; background-color: {color}; height: 6px; border-radius: 5px;"></div>
-                    </div>
-                </div>
-                """
-                st.markdown(html, unsafe_allow_html=True)
-        
-        with st.expander("詳細データテーブル"):
-            st.dataframe(sorted_perf.drop(columns=[ACHIEVEMENT_RATE_COL])) # 表示時は一時列を削除
+                    """
+                    st.markdown(html, unsafe_allow_html=True)
+            
+            with st.expander("詳細データテーブル"): st.dataframe(sorted_perf)
+        else:
+            st.warning("パフォーマンスデータに達成率の列が見つかりません。")
     else:
         st.info("診療科別パフォーマンスを計算する十分なデータがありません。")
         
