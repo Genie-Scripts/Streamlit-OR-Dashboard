@@ -1,40 +1,43 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, time
-import re # 正規表現モジュールをインポート
+import re
+import unicodedata # 全角・半角の変換に必要
 from utils import date_helpers
 from analysis import weekly
 
 # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★ ここが最終修正箇所です: 正規表現を使い、より強力な正規化処理に変更 ★
+# ★ ここが最終修正箇所です: 全角を半角に変換する処理を追加 ★
 # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 def _normalize_room_name(series):
-    """手術室名の表記を正規化（数字部分を抽出し'OR'を付与）する"""
+    """手術室名の表記を正規化（全角→半角、大文字化、数字抽出）する"""
     if not pd.api.types.is_string_dtype(series):
         series = series.astype(str)
     
-    # 正規表現 r'(\d+)' を使って、文字列から連続した数字部分を抽出
-    extracted_numbers = series.str.extract(r'(\d+)', expand=False).dropna()
+    # 全角文字を半角に変換 (NFKCという方式で統一)
+    # これにより "ＯＰ－１２" -> "OP-12" のように変換される
+    half_width_series = series.apply(lambda x: unicodedata.normalize('NFKC', x) if isinstance(x, str) else x)
     
-    # 抽出できた数字の前に 'OR' を結合して、新しい列を返す
+    # 既存の正規化処理を続ける
+    # 大文字化 -> "op-12" -> "OP-12"
+    # 数字部分を抽出 -> "12"
+    extracted_numbers = half_width_series.str.upper().str.extract(r'(\d+)', expand=False).dropna()
+    
+    # "OR"を付与 -> "OR12"
     return 'OR' + extracted_numbers
+
 
 def _convert_to_datetime(series, date_series):
     """Excelの数値時間とテキスト時間を両方考慮してdatetimeオブジェクトに変換する"""
     try:
-        # まず数値（Excel時間）として試す
         numeric_series = pd.to_numeric(series, errors='coerce')
-        # dropna()の前にあるseriesの長さを確認
         if not series.dropna().empty and numeric_series.notna().sum() / len(series.dropna()) > 0.8:
             time_deltas = pd.to_timedelta(numeric_series * 24, unit='h', errors='coerce')
             return pd.to_datetime(date_series.astype(str)) + time_deltas
         
-        # テキスト時間として処理 (formatを指定せず、pandasの自動解析に任せる)
         time_only_series = pd.to_datetime(series, errors='coerce', format=None).dt.time
-        
         valid_times = time_only_series.notna()
         combined_dt = pd.Series(pd.NaT, index=series.index)
-        
         if valid_times.any():
             date_series_valid = date_series[valid_times]
             time_only_series_valid = time_only_series[valid_times]
@@ -42,6 +45,7 @@ def _convert_to_datetime(series, date_series):
         return combined_dt
     except Exception:
         return pd.Series(pd.NaT, index=series.index)
+
 
 def calculate_operating_room_utilization(df, period_df):
     """
@@ -55,7 +59,6 @@ def calculate_operating_room_utilization(df, period_df):
         return 0.0
         
     start_col, end_col, room_col = None, None, None
-    
     possible_start_keys = ['入室時刻', '開始']; possible_end_keys = ['退室時刻', '終了']; possible_room_keys = ['実施手術室', '手術室']
     for col in df.columns:
         if not start_col and any(key in col for key in possible_start_keys): start_col = col
@@ -67,8 +70,6 @@ def calculate_operating_room_utilization(df, period_df):
     if start_col and end_col and room_col:
         try:
             target_rooms = ['OR1', 'OR2', 'OR3', 'OR4', 'OR5', 'OR6', 'OR7', 'OR8', 'OR9', 'OR10', 'OR12']
-            
-            # 正規化した手術室名でフィルタリング
             normalized_room_series = _normalize_room_name(weekday_df[room_col])
             filtered_weekday_df = weekday_df[normalized_room_series.isin(target_rooms)].copy()
 
