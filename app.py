@@ -404,6 +404,51 @@ def render_prediction_page(df, target_dict, latest_date):
                     else:
                         st.info(f"✅ 対象期間中の休日手術は0件のため、平日・全日どちらでも同じ結果になります。")
                     
+                    # より詳細な期間分析
+                    st.subheader("📅 予測データの期間分析")
+                    
+                    if '種別' in result_df.columns:
+                        actual_forecast_df = result_df[result_df['種別'] == '実績']
+                        if not actual_forecast_df.empty:
+                            # 予測で使用された実績期間を確認
+                            if 'month_start' in actual_forecast_df.columns:
+                                forecast_start = actual_forecast_df['month_start'].min()
+                                forecast_end = actual_forecast_df['month_start'].max()
+                                forecast_months = len(actual_forecast_df)
+                                
+                                period_info = pd.DataFrame({
+                                    '項目': [
+                                        '予測用実績データ期間（開始）',
+                                        '予測用実績データ期間（終了）',
+                                        '予測用データポイント数',
+                                        '予測値の意味',
+                                        '生データとの関係'
+                                    ],
+                                    '値': [
+                                        forecast_start.strftime('%Y年%m月') if pd.notna(forecast_start) else '不明',
+                                        forecast_end.strftime('%Y年%m月') if pd.notna(forecast_end) else '不明',
+                                        f"{forecast_months}ヶ月分",
+                                        "月次集計値（月平均 or 月総数）",
+                                        f"生データ{gas_count:,}件 → 月次集計{forecast_months}ヶ月"
+                                    ]
+                                })
+                                
+                                st.dataframe(period_info, hide_index=True, use_container_width=True)
+                                
+                                # 月あたりの平均件数を計算
+                                if forecast_months > 0:
+                                    avg_per_month_from_raw = gas_count / forecast_months
+                                    avg_per_month_from_forecast = actual_forecast_df['値'].mean()
+                                    
+                                    st.info(f"""
+                                    📊 **月次データの検証**:
+                                    - 生データから計算した月平均: {avg_per_month_from_raw:.1f}件/月
+                                    - 予測データの月平均: {avg_per_month_from_forecast:.1f}件/月
+                                    
+                                    {"✅ 値が近似→予測は月総数を使用" if abs(avg_per_month_from_raw - avg_per_month_from_forecast) < avg_per_month_from_raw * 0.1 
+                                     else "⚠️ 値が異なる→予測は日平均など別の単位を使用"}
+                                    """)
+                    
                     # 予測サマリーテーブル表示
                     st.header("📋 予測サマリー")
                     
