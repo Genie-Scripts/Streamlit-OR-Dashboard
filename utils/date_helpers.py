@@ -1,133 +1,257 @@
-# utils/date_helpers.py
+# utils/date_helpers.py (jpholidayフォールバック対応版)
 import pandas as pd
-from datetime import datetime
-import jpholiday  # requirements.txt に記載
+from datetime import datetime, date
+import warnings
 
-def is_weekday(date):
-    """
-    祝日と年末年始（12/29～1/3）を除外した平日かどうかを判定する
-    """
-    if not isinstance(date, (datetime, pd.Timestamp)):
-        return False
-    if date.weekday() >= 5:  # 土日
-        return False
-    if jpholiday.is_holiday(date):  # 祝日
-        return False
-    if (date.month == 12 and date.day >= 29) or (date.month == 1 and date.day <= 3):  # 年末年始
-        return False
-    return True
+# jpholidayのインポートを安全に行う
+try:
+    import jpholiday
+    JPHOLIDAY_AVAILABLE = True
+except ImportError:
+    JPHOLIDAY_AVAILABLE = False
+    warnings.warn("jpholiday が利用できません。平日判定は土日のみで行います。", UserWarning)
 
-def get_fiscal_year(date):
+def is_weekday(date_input):
     """
-    日付から年度を返す (4月始まり)
+    平日かどうかを判定する（祝日を考慮）
+    
+    Args:
+        date_input: datetime, date, or str
+        
+    Returns:
+        bool: 平日の場合True
     """
-    if date.month >= 4:
-        return date.year
+    if isinstance(date_input, str):
+        date_obj = pd.to_datetime(date_input).date()
+    elif isinstance(date_input, datetime):
+        date_obj = date_input.date()
+    elif isinstance(date_input, date):
+        date_obj = date_input
     else:
-        return date.year - 1
+        try:
+            date_obj = pd.to_datetime(date_input).date()
+        except:
+            return False
+    
+    # 土日の場合は平日ではない
+    if date_obj.weekday() >= 5:  # 5=土曜, 6=日曜
+        return False
+    
+    # jpholidayが利用可能な場合は祝日もチェック
+    if JPHOLIDAY_AVAILABLE:
+        return not jpholiday.is_holiday(date_obj)
+    else:
+        # jpholidayが利用できない場合は土日のみで判定
+        return True
 
-def filter_by_period(df, latest_date, period_str):
+def is_holiday(date_input):
     """
-    期間文字列に基づいてDataFrameをフィルタリングする
+    祝日かどうかを判定する
+    
+    Args:
+        date_input: datetime, date, or str
+        
+    Returns:
+        bool: 祝日の場合True
     """
-    if period_str == "直近30日":
+    if isinstance(date_input, str):
+        date_obj = pd.to_datetime(date_input).date()
+    elif isinstance(date_input, datetime):
+        date_obj = date_input.date()
+    elif isinstance(date_input, date):
+        date_obj = date_input
+    else:
+        try:
+            date_obj = pd.to_datetime(date_input).date()
+        except:
+            return False
+    
+    if JPHOLIDAY_AVAILABLE:
+        return jpholiday.is_holiday(date_obj)
+    else:
+        # jpholidayが利用できない場合は主要な祝日のみ手動で定義
+        return is_major_holiday(date_obj)
+
+def is_major_holiday(date_obj):
+    """
+    主要な祝日を手動で判定（jpholidayのフォールバック）
+    
+    Args:
+        date_obj: date object
+        
+    Returns:
+        bool: 主要祝日の場合True
+    """
+    month = date_obj.month
+    day = date_obj.day
+    year = date_obj.year
+    
+    # 固定祝日
+    fixed_holidays = [
+        (1, 1),   # 元旦
+        (2, 11),  # 建国記念の日
+        (4, 29),  # 昭和の日
+        (5, 3),   # 憲法記念日
+        (5, 4),   # みどりの日
+        (5, 5),   # こどもの日
+        (8, 11),  # 山の日
+        (11, 3),  # 文化の日
+        (11, 23), # 勤労感謝の日
+        (12, 23), # 天皇誕生日（2019年以降）
+    ]
+    
+    if (month, day) in fixed_holidays:
+        return True
+    
+    # 年末年始
+    if (month == 12 and day >= 29) or (month == 1 and day <= 3):
+        return True
+    
+    # ゴールデンウィーク期間の追加考慮
+    if month == 5 and 1 <= day <= 5:
+        return True
+    
+    return False
+
+def get_fiscal_year(date_input):
+    """
+    会計年度を取得する（4月始まり）
+    
+    Args:
+        date_input: datetime, date, or str
+        
+    Returns:
+        int: 会計年度
+    """
+    if isinstance(date_input, str):
+        date_obj = pd.to_datetime(date_input)
+    elif isinstance(date_input, datetime):
+        date_obj = date_input
+    else:
+        date_obj = pd.to_datetime(date_input)
+    
+    if date_obj.month >= 4:
+        return date_obj.year
+    else:
+        return date_obj.year - 1
+
+def filter_by_period(df, latest_date, period):
+    """
+    期間でデータフィルタリング
+    
+    Args:
+        df: DataFrame
+        latest_date: 最新日付
+        period: 期間（"直近30日", "直近90日", "今年度", "去年度"）
+        
+    Returns:
+        DataFrame: フィルタリング後のデータ
+    """
+    if df.empty or latest_date is None:
+        return df
+    
+    date_col = None
+    for col in ['手術実施日_dt', '日付', 'date']:
+        if col in df.columns:
+            date_col = col
+            break
+    
+    if date_col is None:
+        return df
+    
+    if period == "直近30日":
         start_date = latest_date - pd.Timedelta(days=29)
-    elif period_str == "直近90日":
+        return df[df[date_col] >= start_date]
+    elif period == "直近90日":
         start_date = latest_date - pd.Timedelta(days=89)
-    elif period_str == "直近180日":
-        start_date = latest_date - pd.Timedelta(days=179)
-    elif period_str == "今年度":
-        start_date = pd.Timestamp(get_fiscal_year(latest_date), 4, 1)
-    else: # 全期間
+        return df[df[date_col] >= start_date]
+    elif period == "今年度":
+        fiscal_year = get_fiscal_year(latest_date)
+        start_date = pd.Timestamp(fiscal_year, 4, 1)
+        end_date = pd.Timestamp(fiscal_year + 1, 3, 31)
+        return df[(df[date_col] >= start_date) & (df[date_col] <= end_date)]
+    elif period == "去年度":
+        fiscal_year = get_fiscal_year(latest_date) - 1
+        start_date = pd.Timestamp(fiscal_year, 4, 1)
+        end_date = pd.Timestamp(fiscal_year + 1, 3, 31)
+        return df[(df[date_col] >= start_date) & (df[date_col] <= end_date)]
+    else:
         return df
 
-    return df[df['手術実施日_dt'] >= start_date]
-    
-# utils/date_helpers.py に追加する関数
-
-def filter_by_complete_weeks(df, latest_date, num_weeks):
+def add_date_features(df, date_col='手術実施日_dt'):
     """
-    完全週単位でデータをフィルタリングする
+    日付関連の特徴量を追加
     
     Args:
-        df: データフレーム
-        latest_date: 最新日付
-        num_weeks: 週数（4, 12など）
-    
+        df: DataFrame
+        date_col: 日付列名
+        
     Returns:
-        フィルタリングされたデータフレーム
+        DataFrame: 特徴量追加後のデータ
     """
-    from analysis import weekly
+    if date_col not in df.columns:
+        return df
     
-    # 分析終了日を前の日曜日に設定
-    analysis_end_date = weekly.get_analysis_end_date(latest_date)
+    df = df.copy()
     
-    if analysis_end_date is None:
-        return df.iloc[0:0]  # 空のデータフレームを返す
+    # 基本的な日付特徴量
+    df['year'] = df[date_col].dt.year
+    df['month'] = df[date_col].dt.month
+    df['day'] = df[date_col].dt.day
+    df['weekday'] = df[date_col].dt.weekday  # 0=月曜, 6=日曜
+    df['quarter'] = df[date_col].dt.quarter
     
-    # 開始日を計算（月曜日起算）
-    start_date = analysis_end_date - pd.Timedelta(days=(num_weeks * 7 - 1))
+    # 平日・休日判定
+    df['is_weekday'] = df[date_col].apply(is_weekday)
+    df['is_holiday'] = df[date_col].apply(is_holiday)
     
-    return df[
-        (df['手術実施日_dt'] >= start_date) & 
-        (df['手術実施日_dt'] <= analysis_end_date)
-    ]
+    # 週の開始日（月曜日）
+    df['week_start'] = df[date_col].dt.to_period('W-MON').dt.start_time
+    
+    # 月の開始日
+    df['month_start'] = df[date_col].dt.to_period('M').dt.start_time
+    
+    # 会計年度
+    df['fiscal_year'] = df[date_col].apply(get_fiscal_year)
+    
+    return df
 
-def get_period_info(latest_date, num_weeks):
+def get_weekday_name_ja(weekday_num):
     """
-    完全週単位の期間情報を取得する
+    曜日番号を日本語の曜日名に変換
     
     Args:
-        latest_date: 最新日付
-        num_weeks: 週数
-    
+        weekday_num: 曜日番号（0=月曜, 6=日曜）
+        
     Returns:
-        dict: 期間情報（開始日、終了日、実日数など）
+        str: 日本語の曜日名
     """
-    from analysis import weekly
-    
-    analysis_end_date = weekly.get_analysis_end_date(latest_date)
-    
-    if analysis_end_date is None:
-        return {}
-    
-    start_date = analysis_end_date - pd.Timedelta(days=(num_weeks * 7 - 1))
-    
-    # 平日数を計算
-    weekdays = pd.bdate_range(start=start_date, end=analysis_end_date)
-    
-    return {
-        'start_date': start_date,
-        'end_date': analysis_end_date,
-        'total_days': num_weeks * 7,
-        'weekdays': len(weekdays),
-        'weeks': num_weeks,
-        'excluded_days': (latest_date - analysis_end_date).days
-    }
+    weekday_names = ['月', '火', '水', '木', '金', '土', '日']
+    if 0 <= weekday_num <= 6:
+        return weekday_names[weekday_num]
+    else:
+        return 'unknown'
 
-def format_period_description(latest_date, num_weeks):
+def format_date_range(start_date, end_date):
     """
-    期間の説明文を生成する
+    日付範囲を読みやすい形式でフォーマット
     
     Args:
-        latest_date: 最新日付
-        num_weeks: 週数
-    
+        start_date: 開始日
+        end_date: 終了日
+        
     Returns:
-        str: 期間説明文
+        str: フォーマット済み日付範囲
     """
-    info = get_period_info(latest_date, num_weeks)
+    if pd.isna(start_date) or pd.isna(end_date):
+        return "日付範囲不明"
     
-    if not info:
-        return "期間情報を取得できませんでした"
+    start_str = pd.to_datetime(start_date).strftime('%Y/%m/%d')
+    end_str = pd.to_datetime(end_date).strftime('%Y/%m/%d')
     
-    description = (
-        f"📊 分析期間: {info['start_date'].strftime('%Y/%m/%d')} ～ "
-        f"{info['end_date'].strftime('%Y/%m/%d')} "
-        f"({info['weeks']}週間 = {info['total_days']}日, 平日{info['weekdays']}日)"
-    )
-    
-    if info['excluded_days'] > 0:
-        description += f"\n💡 最新データ日の{latest_date.strftime('%Y/%m/%d')}から{info['excluded_days']}日分を除外して完全週単位で分析"
-    
-    return description
+    return f"{start_str} ～ {end_str}"
+
+# モジュール読み込み時に状態を報告
+if not JPHOLIDAY_AVAILABLE:
+    print("⚠️ jpholiday が利用できません。祝日判定は主要祝日のみで行います。")
+    print("完全な祝日対応には 'pip install jpholiday' を実行してください。")

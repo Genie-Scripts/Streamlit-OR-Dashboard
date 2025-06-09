@@ -17,6 +17,7 @@ seaborn>=0.11.0
 
 # 日付処理
 python-dateutil>=2.8.0
+jpholiday>=0.1.0  # 日本の祝日処理（date_helpers.pyで使用）
 
 # 時系列予測（オプション - 重いので必要に応じてコメントアウト）
 # prophet>=1.1.0  

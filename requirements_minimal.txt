@@ -11,6 +11,7 @@ plotly>=5.15.0
 
 # 日付処理
 python-dateutil>=2.8.0
+jpholiday>=0.1.0  # 日本の祝日処理（date_helpers.pyで使用）
 
 # タイムゾーン処理
 pytz>=2022.1
