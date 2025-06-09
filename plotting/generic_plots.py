@@ -228,58 +228,79 @@ def create_forecast_summary_table(result_df, target_dict=None, department=None):
     if actual_df.empty and pure_forecast_df.empty:
         return pd.DataFrame(), pd.DataFrame()
     
-    # 年度内の実績累計を計算（月次データを年度で集計）
-    actual_total = actual_df['値'].sum() if not actual_df.empty else 0
+    # 年度内の実績累計を計算（月次データの合計）
+    # 実績値は日平均の累計なので、実際の件数に変換する必要がある
+    actual_daily_avg_sum = actual_df['値'].sum() if not actual_df.empty else 0
     
-    # 予測値の適切な計算
-    # 注意: forecasting.pyから返される値が月平均なのか月総数なのかを確認する必要がある
+    # 実績期間の日数を計算して実際の件数を推定
+    if not actual_df.empty and 'month_start' in actual_df.columns:
+        # 実績期間の総日数を計算
+        start_date = actual_df['month_start'].min()
+        end_date = actual_df['month_start'].max()
+        
+        # 年度開始から最新データまでの総日数を計算
+        fiscal_start = pd.Timestamp(start_date.year if start_date.month >= 4 else start_date.year - 1, 4, 1)
+        total_days = (end_date - fiscal_start).days + 30  # 月末まで含む概算
+        
+        # 全日での実績推定（日平均 × 総日数）
+        estimated_actual_total = (actual_daily_avg_sum / len(actual_df)) * (total_days / 30) * len(actual_df)
+    else:
+        estimated_actual_total = actual_daily_avg_sum
+    
+    # 予測値の適切な計算（予測値は日平均）
     forecast_monthly_details = []
     forecast_total = 0
     
     if not pure_forecast_df.empty:
         for _, row in pure_forecast_df.iterrows():
-            monthly_value = row['値']
+            daily_avg_value = row['値']  # これは日平均値
             
             # 月の日付を取得
             if '月' in row and pd.notna(row['月']):
                 month_date = pd.to_datetime(row['月'])
                 date_str = month_date.strftime('%Y年%m月')
                 
-                # その月の平日数を計算（手術は通常平日のみ）
+                # その月の総日数を計算（全日ベース）
                 year, month = month_date.year, month_date.month
-                # その月の平日数を計算
-                month_start = pd.Timestamp(year, month, 1)
                 if month == 12:
-                    month_end = pd.Timestamp(year + 1, 1, 1) - pd.Timedelta(days=1)
+                    next_month = pd.Timestamp(year + 1, 1, 1)
                 else:
-                    month_end = pd.Timestamp(year, month + 1, 1) - pd.Timedelta(days=1)
+                    next_month = pd.Timestamp(year, month + 1, 1)
                 
-                # 平日数を計算（pandas.bdate_rangeを使用）
+                days_in_month = (next_month - pd.Timestamp(year, month, 1)).days
+                
+                # 平日数も計算
+                month_start = pd.Timestamp(year, month, 1)
+                month_end = next_month - pd.Timedelta(days=1)
                 weekdays_in_month = len(pd.bdate_range(start=month_start, end=month_end))
                 
-                # 予測値が月平均件数の場合、月総数に変換
-                # ここは forecasting.py の実装により調整が必要
-                # 仮に月平均と仮定して、平日数を掛ける
-                estimated_monthly_total = monthly_value * weekdays_in_month
+                # 予測は全日データベースなので、全日数を使用
+                estimated_monthly_total = daily_avg_value * days_in_month
+                estimated_monthly_weekday = daily_avg_value * weekdays_in_month
                 
                 forecast_monthly_details.append({
                     '予測期間': date_str,
+                    '総日数': f"{days_in_month}日",
                     '平日数': f"{weekdays_in_month}日",
-                    '月平均予測': f"{monthly_value:.1f}件/日", 
-                    '月総数予測': f"{estimated_monthly_total:.0f}件"
+                    '日平均予測': f"{daily_avg_value:.1f}件/日", 
+                    '月総数予測(全日)': f"{estimated_monthly_total:.0f}件",
+                    '月総数予測(平日のみ)': f"{estimated_monthly_weekday:.0f}件"
                 })
                 
+                # 全日ベースで累計
                 forecast_total += estimated_monthly_total
             else:
                 forecast_monthly_details.append({
                     '予測期間': "不明",
+                    '総日数': "不明",
                     '平日数': "不明",
-                    '月平均予測': f"{monthly_value:.1f}件/日",
-                    '月総数予測': "算出不可"
+                    '日平均予測': f"{daily_avg_value:.1f}件/日",
+                    '月総数予測(全日)': "算出不可",
+                    '月総数予測(平日のみ)': "算出不可"
                 })
     
     # 年度合計予測
-    year_total_forecast = actual_total + forecast_total
+    year_total_forecast = estimated_actual_total + forecast_total
     
     # 目標との比較（年度目標を週次目標から算出）
     annual_target = None
@@ -293,25 +314,25 @@ def create_forecast_summary_table(result_df, target_dict=None, department=None):
     # サマリーテーブル作成
     summary_data = {
         '項目': [
-            '年度内実績累計 (平日)',
-            '年度内予測累計 (平日)', 
-            '年度合計予測 (平日)',
+            '年度内実績累計 (全日推定)',
+            '年度内予測累計 (全日)', 
+            '年度合計予測 (全日)',
             '年度目標 (平日ベース)',
             '目標達成率予測'
         ],
         '値': [
-            f"{actual_total:.0f}件",
+            f"{estimated_actual_total:.0f}件",
             f"{forecast_total:.0f}件",
             f"{year_total_forecast:.0f}件",
             f"{annual_target:.0f}件" if annual_target else "未設定",
             f"{target_achievement_rate:.1f}%" if target_achievement_rate else "算出不可"
         ],
         '備考': [
-            "実績データの月次合計",
-            "予測データの月次合計",
-            "実績 + 予測の年度合計",
-            "週次目標 × 52週",
-            "年度合計予測 ÷ 年度目標"
+            "実績日平均から全日ベースで推定",
+            "予測日平均 × 各月の全日数",
+            "実績推定 + 予測累計",
+            "週次目標 × 52週（平日ベース）",
+            "全日予測 vs 平日目標での比較"
         ]
     }
     
