@@ -216,7 +216,7 @@ def create_forecast_summary_table(result_df, target_dict=None, department=None):
     予測結果のサマリーテーブルを作成
     """
     if result_df.empty or '種別' not in result_df.columns:
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
     
     # 実績と予測を分離
     actual_df = result_df[result_df['種別'] == '実績'].copy()
@@ -226,13 +226,57 @@ def create_forecast_summary_table(result_df, target_dict=None, department=None):
     pure_forecast_df = forecast_df[forecast_df.index > 0] if len(forecast_df) > 1 else forecast_df
     
     if actual_df.empty and pure_forecast_df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
     
-    # 年度内の実績累計を計算
+    # 年度内の実績累計を計算（月次データを年度で集計）
     actual_total = actual_df['値'].sum() if not actual_df.empty else 0
     
-    # 年度内の予測累計を計算
-    forecast_total = pure_forecast_df['値'].sum() if not pure_forecast_df.empty else 0
+    # 予測値の適切な計算
+    # 注意: forecasting.pyから返される値が月平均なのか月総数なのかを確認する必要がある
+    forecast_monthly_details = []
+    forecast_total = 0
+    
+    if not pure_forecast_df.empty:
+        for _, row in pure_forecast_df.iterrows():
+            monthly_value = row['値']
+            
+            # 月の日付を取得
+            if '月' in row and pd.notna(row['月']):
+                month_date = pd.to_datetime(row['月'])
+                date_str = month_date.strftime('%Y年%m月')
+                
+                # その月の平日数を計算（手術は通常平日のみ）
+                year, month = month_date.year, month_date.month
+                # その月の平日数を計算
+                month_start = pd.Timestamp(year, month, 1)
+                if month == 12:
+                    month_end = pd.Timestamp(year + 1, 1, 1) - pd.Timedelta(days=1)
+                else:
+                    month_end = pd.Timestamp(year, month + 1, 1) - pd.Timedelta(days=1)
+                
+                # 平日数を計算（pandas.bdate_rangeを使用）
+                weekdays_in_month = len(pd.bdate_range(start=month_start, end=month_end))
+                
+                # 予測値が月平均件数の場合、月総数に変換
+                # ここは forecasting.py の実装により調整が必要
+                # 仮に月平均と仮定して、平日数を掛ける
+                estimated_monthly_total = monthly_value * weekdays_in_month
+                
+                forecast_monthly_details.append({
+                    '予測期間': date_str,
+                    '平日数': f"{weekdays_in_month}日",
+                    '月平均予測': f"{monthly_value:.1f}件/日", 
+                    '月総数予測': f"{estimated_monthly_total:.0f}件"
+                })
+                
+                forecast_total += estimated_monthly_total
+            else:
+                forecast_monthly_details.append({
+                    '予測期間': "不明",
+                    '平日数': "不明",
+                    '月平均予測': f"{monthly_value:.1f}件/日",
+                    '月総数予測': "算出不可"
+                })
     
     # 年度合計予測
     year_total_forecast = actual_total + forecast_total
@@ -249,10 +293,10 @@ def create_forecast_summary_table(result_df, target_dict=None, department=None):
     # サマリーテーブル作成
     summary_data = {
         '項目': [
-            '年度内実績累計',
-            '年度内予測累計', 
-            '年度合計予測',
-            '年度目標',
+            '年度内実績累計 (平日)',
+            '年度内予測累計 (平日)', 
+            '年度合計予測 (平日)',
+            '年度目標 (平日ベース)',
             '目標達成率予測'
         ],
         '値': [
@@ -261,25 +305,18 @@ def create_forecast_summary_table(result_df, target_dict=None, department=None):
             f"{year_total_forecast:.0f}件",
             f"{annual_target:.0f}件" if annual_target else "未設定",
             f"{target_achievement_rate:.1f}%" if target_achievement_rate else "算出不可"
+        ],
+        '備考': [
+            "実績データの月次合計",
+            "予測データの月次合計",
+            "実績 + 予測の年度合計",
+            "週次目標 × 52週",
+            "年度合計予測 ÷ 年度目標"
         ]
     }
     
-    # 月別予測詳細
-    monthly_details = []
-    if not pure_forecast_df.empty:
-        for _, row in pure_forecast_df.iterrows():
-            if '月' in row and pd.notna(row['月']):
-                date_str = pd.to_datetime(row['月']).strftime('%Y年%m月')
-            else:
-                date_str = "不明"
-            
-            monthly_details.append({
-                '予測期間': date_str,
-                '予測件数': f"{row['値']:.1f}件"
-            })
-    
     summary_df = pd.DataFrame(summary_data)
-    monthly_df = pd.DataFrame(monthly_details)
+    monthly_df = pd.DataFrame(forecast_monthly_details)
     
     return summary_df, monthly_df
 

@@ -291,7 +291,18 @@ def render_prediction_page(df, target_dict, latest_date):
     st.title("🔮 将来予測")
     
     # 予測対象の説明を追加
-    st.info("📊 **予測対象**: 全身麻酔手術（20分以上）のみを対象としています")
+    with st.expander("📊 予測データの詳細説明", expanded=False):
+        st.markdown("""
+        **予測対象データ**: 全身麻酔手術（20分以上）のみ
+        
+        **データ範囲**: 
+        - 基本的に平日のみを対象（土日祝日、年末年始除く）
+        - `is_gas_20min`フィルタが適用された手術のみ
+        
+        **予測方法**:
+        - 過去の月次データから将来を予測
+        - 予測値は月平均値として算出され、月総数に変換表示
+        """)
     
     tab1, tab2, tab3 = st.tabs(["将来予測", "モデル検証", "パラメータ最適化"])
 
@@ -321,6 +332,24 @@ def render_prediction_page(df, target_dict, latest_date):
                     # 予測サマリーテーブル表示
                     st.header("📋 予測サマリー")
                     
+                    # 入力データの確認情報を表示
+                    if department:
+                        input_data = df[df['実施診療科'] == department]
+                    else:
+                        input_data = df
+                    
+                    gas_data = input_data[input_data['is_gas_20min']]
+                    weekday_data = gas_data[gas_data['is_weekday']]
+                    
+                    st.info(f"""
+                    📊 **入力データ確認**
+                    - 対象: {department or '病院全体'}
+                    - 全データ: {len(input_data):,}件
+                    - 全身麻酔(20分以上): {len(gas_data):,}件
+                    - うち平日のみ: {len(weekday_data):,}件
+                    - 予測はこの平日データを基に実行されています
+                    """)
+                    
                     try:
                         summary_df, monthly_df = generic_plots.create_forecast_summary_table(
                             result_df, target_dict, department
@@ -332,11 +361,13 @@ def render_prediction_page(df, target_dict, latest_date):
                             with col1:
                                 st.subheader("年度予測サマリー")
                                 st.dataframe(summary_df, hide_index=True, use_container_width=True)
+                                st.caption("⚠️ 予測値が月平均の場合、平日数を掛けて月総数に変換して表示")
                             
                             with col2:
                                 st.subheader("月別予測詳細")
                                 if not monthly_df.empty:
                                     st.dataframe(monthly_df, hide_index=True, use_container_width=True)
+                                    st.caption("各月の平日数に基づいて月総数を算出")
                                 else:
                                     st.info("月別予測データがありません")
                         else:
@@ -344,10 +375,11 @@ def render_prediction_page(df, target_dict, latest_date):
                             
                     except Exception as e:
                         st.error(f"サマリーテーブル生成エラー: {str(e)}")
+                        st.write("エラー詳細:", e)
                     
                     # モデル評価指標表示
-                    st.header("📊 モデル評価指標")
-                    st.write(metrics)
+                    with st.expander("📊 モデル評価指標詳細"):
+                        st.write(metrics)
                     
     with tab2:
         st.header("予測モデルの精度検証")
