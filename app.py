@@ -293,15 +293,15 @@ def render_prediction_page(df, target_dict, latest_date):
     # 予測対象の説明を追加
     with st.expander("📊 予測データの詳細説明", expanded=False):
         st.markdown("""
-        **予測対象データ**: 全身麻酔手術（20分以上）のみ
+        **予測対象データ**: 全身麻酔手術（20分以上）
         
-        **データ範囲**: 
-        - 基本的に平日のみを対象（土日祝日、年末年始除く）
-        - `is_gas_20min`フィルタが適用された手術のみ
+        **重要**: 休日データの扱いについては実装により異なります
+        - 平日のみ対象の場合: 土日祝日、年末年始は除外
+        - 全日対象の場合: 休日の緊急手術も含む
         
-        **予測方法**:
-        - 過去の月次データから将来を予測
-        - 予測値は月平均値として算出され、月総数に変換表示
+        **フィルタ条件**:
+        - `is_gas_20min = True` （全身麻酔20分以上）
+        - `is_weekday` の使用有無は実装依存
         """)
     
     tab1, tab2, tab3 = st.tabs(["将来予測", "モデル検証", "パラメータ最適化"])
@@ -329,26 +329,83 @@ def render_prediction_page(df, target_dict, latest_date):
                     fig = generic_plots.create_forecast_chart(result_df, title)
                     st.plotly_chart(fig, use_container_width=True)
                     
+                    # 予測に使用された実際のデータを詳細分析
+                    st.header("🔍 予測入力データの詳細分析")
+                    
+                    if department:
+                        base_data = df[df['実施診療科'] == department]
+                    else:
+                        base_data = df
+                    
+                    # 各段階でのデータ件数を詳細に表示
+                    total_data = len(base_data)
+                    gas_data = base_data[base_data['is_gas_20min']]
+                    gas_count = len(gas_data)
+                    
+                    # 平日・休日の内訳
+                    weekday_data = gas_data[gas_data['is_weekday']]
+                    weekend_data = gas_data[~gas_data['is_weekday']]
+                    weekday_count = len(weekday_data)
+                    weekend_count = len(weekend_data)
+                    
+                    # 曜日別の詳細分析
+                    day_analysis = gas_data.groupby(gas_data['手術実施日_dt'].dt.day_name()).size()
+                    
+                    col1, col2 = st.columns([1, 1])
+                    
+                    with col1:
+                        st.subheader("📊 データフィルタリング結果")
+                        filter_summary = pd.DataFrame({
+                            'フィルタ段階': [
+                                '1. 全データ',
+                                '2. 全身麻酔(20分以上)',
+                                '3. うち平日のみ',
+                                '4. うち休日のみ'
+                            ],
+                            '件数': [
+                                f"{total_data:,}件",
+                                f"{gas_count:,}件", 
+                                f"{weekday_count:,}件",
+                                f"{weekend_count:,}件"
+                            ],
+                            '割合': [
+                                "100%",
+                                f"{gas_count/total_data*100:.1f}%" if total_data > 0 else "0%",
+                                f"{weekday_count/gas_count*100:.1f}%" if gas_count > 0 else "0%",
+                                f"{weekend_count/gas_count*100:.1f}%" if gas_count > 0 else "0%"
+                            ]
+                        })
+                        st.dataframe(filter_summary, hide_index=True, use_container_width=True)
+                    
+                    with col2:
+                        st.subheader("📅 曜日別内訳")
+                        if not day_analysis.empty:
+                            day_df = pd.DataFrame({
+                                '曜日': day_analysis.index,
+                                '件数': day_analysis.values
+                            })
+                            # 曜日順にソート
+                            day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                            day_df['曜日順'] = day_df['曜日'].map({day: i for i, day in enumerate(day_order)})
+                            day_df = day_df.sort_values('曜日順').drop('曜日順', axis=1)
+                            st.dataframe(day_df, hide_index=True, use_container_width=True)
+                    
+                    # 重要な確認メッセージ
+                    if weekend_count > 0:
+                        st.warning(f"""
+                        ⚠️ **重要確認**: 休日にも{weekend_count}件の全身麻酔手術があります。
+                        
+                        **予測モデルがどちらを使用しているかは `forecasting.py` の実装によります：**
+                        - 平日のみ使用: {weekday_count}件のデータで予測
+                        - 全日使用: {gas_count}件のデータで予測
+                        
+                        実際に使用されているデータは、予測結果の実績部分の件数と比較して確認できます。
+                        """)
+                    else:
+                        st.info(f"✅ 対象期間中の休日手術は0件のため、平日・全日どちらでも同じ結果になります。")
+                    
                     # 予測サマリーテーブル表示
                     st.header("📋 予測サマリー")
-                    
-                    # 入力データの確認情報を表示
-                    if department:
-                        input_data = df[df['実施診療科'] == department]
-                    else:
-                        input_data = df
-                    
-                    gas_data = input_data[input_data['is_gas_20min']]
-                    weekday_data = gas_data[gas_data['is_weekday']]
-                    
-                    st.info(f"""
-                    📊 **入力データ確認**
-                    - 対象: {department or '病院全体'}
-                    - 全データ: {len(input_data):,}件
-                    - 全身麻酔(20分以上): {len(gas_data):,}件
-                    - うち平日のみ: {len(weekday_data):,}件
-                    - 予測はこの平日データを基に実行されています
-                    """)
                     
                     try:
                         summary_df, monthly_df = generic_plots.create_forecast_summary_table(
@@ -361,13 +418,21 @@ def render_prediction_page(df, target_dict, latest_date):
                             with col1:
                                 st.subheader("年度予測サマリー")
                                 st.dataframe(summary_df, hide_index=True, use_container_width=True)
-                                st.caption("⚠️ 予測値が月平均の場合、平日数を掛けて月総数に変換して表示")
+                                
+                                # 実績値との整合性チェック
+                                if '種別' in result_df.columns:
+                                    actual_from_forecast = result_df[result_df['種別'] == '実績']['値'].sum()
+                                    st.caption(f"""
+                                    **整合性チェック**: 
+                                    - 予測結果の実績部分: {actual_from_forecast:.0f}件
+                                    - 平日全身麻酔データ: {weekday_count}件
+                                    - 全日全身麻酔データ: {gas_count}件
+                                    """)
                             
                             with col2:
                                 st.subheader("月別予測詳細")
                                 if not monthly_df.empty:
                                     st.dataframe(monthly_df, hide_index=True, use_container_width=True)
-                                    st.caption("各月の平日数に基づいて月総数を算出")
                                 else:
                                     st.info("月別予測データがありません")
                         else:
