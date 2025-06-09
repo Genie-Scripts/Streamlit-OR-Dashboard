@@ -265,8 +265,6 @@ def get_kpi_summary(df, latest_date):
         (df['手術実施日_dt'] <= analysis_end_date)
     ]
     
-    # 【確認】各KPIの対象データを明確化
-    
     # 1. 全身麻酔手術のみのデータ
     gas_df = recent_df[recent_df['is_gas_20min']]
     
@@ -277,42 +275,26 @@ def get_kpi_summary(df, latest_date):
         return {}
     
     # 基本統計（完全4週間）
-    weeks_in_period = 4  # 完全4週間
     days_in_period = 28  # 完全4週間
+    weekdays_in_period = 20  # 4週間 × 5平日
     
     # 全身麻酔手術の統計
     gas_total_cases = len(gas_df)
-    gas_daily_average = gas_total_cases / days_in_period
-    
-    # 全身麻酔手術の平日のみの統計
     gas_weekday_df = gas_df[gas_df['is_weekday']]
-    weekdays_in_period = 20  # 4週間 × 5平日
     gas_avg_cases_per_weekday = len(gas_weekday_df) / weekdays_in_period
     
     # 全手術の統計
     all_total_cases = len(all_surgery_df)
-    all_daily_average = all_total_cases / days_in_period
-    
-    # 全手術の平日のみの統計
-    all_weekday_df = all_surgery_df[all_surgery_df['is_weekday']]
-    all_avg_cases_per_weekday = len(all_weekday_df) / weekdays_in_period
     
     # 手術室稼働率（全手術対象、平日のみ）
     utilization_rate = calculate_operating_room_utilization(df, recent_df)
     
-    # KPIデータの対象を明確に表示
+    # メインKPIのみを返す（詳細データは削除）
     return {
-        "総手術件数 (直近4週)": f"{gas_total_cases} (全身麻酔のみ)",
-        "1日あたり平均件数": f"{gas_daily_average:.1f} (全身麻酔のみ)",
+        "全身麻酔手術件数 (直近4週)": gas_total_cases,
+        "全手術件数 (直近4週)": all_total_cases,
         "平日1日あたり平均件数": f"{gas_avg_cases_per_weekday:.1f} (全身麻酔のみ)",
-        "手術室稼働率": f"{utilization_rate:.1f}% (全手術、平日のみ)",
-        
-        # 詳細情報（参考値）
-        "_詳細_全手術件数": f"{all_total_cases}件",
-        "_詳細_全手術日平均": f"{all_daily_average:.1f}件/日",
-        "_詳細_全手術平日平均": f"{all_avg_cases_per_weekday:.1f}件/日",
-        "_詳細_全身麻酔平日件数": f"{len(gas_weekday_df)}件",
-        "_詳細_全手術平日件数": f"{len(all_weekday_df)}件"
+        "手術室稼働率": f"{utilization_rate:.1f}% (全手術、平日のみ)"
     }
 
 def get_department_performance_summary(df, target_dict, latest_date):
@@ -437,5 +419,5 @@ def calculate_cumulative_cases(df, target_weekly_cases):
     weekly_df['累積実績'] = weekly_df['週次実績'].cumsum()
     weekly_df['経過週'] = np.arange(len(weekly_df)) + 1
     weekly_df['累積目標'] = weekly_df['経過週'] * target_weekly_cases
-
+    
     return weekly_df[['週', '週次実績', '累積実績', '累積目標']]
