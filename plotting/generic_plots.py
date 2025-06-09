@@ -129,6 +129,18 @@ def create_forecast_chart(result_df, title):
     if result_df.empty:
         return go.Figure()
     
+    # デバッグ情報を追加
+    st.write("**予測データのデバッグ情報:**")
+    st.write(f"データフレームの列: {list(result_df.columns)}")
+    st.write(f"データフレームの形状: {result_df.shape}")
+    st.write("**全データ:**")
+    st.dataframe(result_df)
+    
+    # 種別ごとのデータ数を確認
+    if '種別' in result_df.columns:
+        st.write("**種別ごとのデータ数:**")
+        st.write(result_df['種別'].value_counts())
+    
     fig = go.Figure()
     
     # データ構造を確認して実績・予測を分離
@@ -141,11 +153,14 @@ def create_forecast_chart(result_df, title):
         date_col = 'month_start'
         value_col = '値'
         
+        st.write(f"**実績データ数: {len(actual_df)}, 予測データ数: {len(forecast_df)}**")
+        
         # 実績と予測の間に連続性を保つため、実績の最終点を予測の先頭に追加
         if not actual_df.empty and not forecast_df.empty:
             connector = actual_df.tail(1).copy()
             connector['種別'] = '予測'  # 種別を予測に変更
             forecast_df = pd.concat([connector, forecast_df], ignore_index=True)
+            st.write(f"**連続性調整後の予測データ数: {len(forecast_df)}**")
             
     elif 'タイプ' in result_df.columns:
         # 'タイプ'列がある場合の処理（レガシー対応）
@@ -165,6 +180,7 @@ def create_forecast_chart(result_df, title):
     
     # 実績データのプロット
     if not actual_df.empty:
+        st.write(f"**実績データの期間:** {actual_df[date_col].min()} ～ {actual_df[date_col].max()}")
         fig.add_trace(go.Scatter(
             x=actual_df[date_col], 
             y=actual_df[value_col], 
@@ -176,6 +192,7 @@ def create_forecast_chart(result_df, title):
     
     # 予測データのプロット
     if not forecast_df.empty:
+        st.write(f"**予測データの期間:** {forecast_df[date_col].min()} ～ {forecast_df[date_col].max()}")
         fig.add_trace(go.Scatter(
             x=forecast_df[date_col], 
             y=forecast_df[value_col], 
