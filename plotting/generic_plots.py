@@ -211,9 +211,15 @@ def create_forecast_chart(result_df, title):
     
     return fig
 
-def create_forecast_summary_table(result_df, target_dict=None, department=None):
+def create_forecast_summary_table(result_df, target_dict=None, department=None, source_df=None):
     """
     予測結果のサマリーテーブルを作成
+    
+    Args:
+        result_df: 予測結果データ
+        target_dict: 目標値辞書
+        department: 診療科名
+        source_df: 元の生データ（実績の直接集計用）
     """
     if result_df.empty or '種別' not in result_df.columns:
         return pd.DataFrame(), pd.DataFrame()
@@ -230,41 +236,44 @@ def create_forecast_summary_table(result_df, target_dict=None, department=None):
     
     # 現在の年度を正しく計算
     if not actual_df.empty and 'month_start' in actual_df.columns:
-        # 最新の実績月から年度を判定
         latest_month = actual_df['month_start'].max()
         current_fiscal_year = latest_month.year if latest_month.month >= 4 else latest_month.year - 1
         fiscal_year_start = pd.Timestamp(current_fiscal_year, 4, 1)
         fiscal_year_end = pd.Timestamp(current_fiscal_year + 1, 3, 31)
+        fiscal_year_label = f"{current_fiscal_year}年度"
+    else:
+        current_fiscal_year = 2025
+        fiscal_year_start = pd.Timestamp(2025, 4, 1)
+        fiscal_year_end = pd.Timestamp(2026, 3, 31)
+        fiscal_year_label = "2025年度"
+    
+    # 【重要】実績は生データから直接集計
+    if source_df is not None and not source_df.empty:
+        # 診療科でフィルタリング
+        if department:
+            dept_data = source_df[source_df['実施診療科'] == department]
+        else:
+            dept_data = source_df
         
-        # 年度内の実績データのみを抽出
+        # 全身麻酔手術でフィルタリング
+        gas_data = dept_data[dept_data['is_gas_20min']]
+        
+        # 年度内データでフィルタリング
+        fiscal_data = gas_data[
+            (gas_data['手術実施日_dt'] >= fiscal_year_start) & 
+            (gas_data['手術実施日_dt'] <= fiscal_year_end)
+        ]
+        
+        # 実績は単純な件数集計
+        estimated_actual_total = len(fiscal_data)
+        
+        actual_calculation_method = f"生データから直接集計（{fiscal_year_start.strftime('%Y/%m/%d')}以降）"
+    else:
+        # フォールバック：予測データから推定（非推奨）
         fiscal_actual_df = actual_df[actual_df['month_start'] >= fiscal_year_start]
         
-        # 年度内実績の累計計算（日平均の合計を実際の件数に変換）
         if not fiscal_actual_df.empty:
-            # 年度内の実績期間の日数を計算
-            actual_months = len(fiscal_actual_df)
-            daily_avg_sum = fiscal_actual_df['値'].sum()
-            
-            # 各月の日数を考慮して実際の件数を推定
-            total_actual_days = 0
-            for _, row in fiscal_actual_df.iterrows():
-                month_date = row['month_start']
-                year, month = month_date.year, month_date.month
-                
-                # その月の総日数
-                if month == 12:
-                    next_month = pd.Timestamp(year + 1, 1, 1)
-                else:
-                    next_month = pd.Timestamp(year, month + 1, 1)
-                
-                days_in_month = (next_month - pd.Timestamp(year, month, 1)).days
-                total_actual_days += days_in_month
-            
-            # 年度内実績の推定（日平均 × 対象期間の総日数）
-            estimated_actual_total = (daily_avg_sum / actual_months) * total_actual_days / (total_actual_days / actual_months)
-            estimated_actual_total = daily_avg_sum * (total_actual_days / actual_months)
-            
-            # より正確な計算：各月の日平均 × その月の日数
+            # 各月の日平均 × その月の日数で推定
             estimated_actual_total = 0
             for _, row in fiscal_actual_df.iterrows():
                 month_date = row['month_start']
@@ -280,13 +289,8 @@ def create_forecast_summary_table(result_df, target_dict=None, department=None):
                 estimated_actual_total += daily_avg * days_in_month
         else:
             estimated_actual_total = 0
-            fiscal_year_start = pd.Timestamp(2025, 4, 1)  # デフォルト
             
-        fiscal_year_label = f"{current_fiscal_year}年度"
-    else:
-        estimated_actual_total = 0
-        fiscal_year_start = pd.Timestamp(2025, 4, 1)
-        fiscal_year_label = "2025年度"
+        actual_calculation_method = "予測データから推定（日平均×日数）"
     
     # 予測値の計算（年度末までの残り期間）
     forecast_monthly_details = []
@@ -355,9 +359,9 @@ def create_forecast_summary_table(result_df, target_dict=None, department=None):
     # サマリーテーブル作成
     summary_data = {
         '項目': [
-            f'{fiscal_year_label}実績累計 (全日)',
-            f'{fiscal_year_label}予測累計 (全日)', 
-            f'{fiscal_year_label}合計予測 (全日)',
+            f'{fiscal_year_label}実績累計',
+            f'{fiscal_year_label}予測累計', 
+            f'{fiscal_year_label}合計予測',
             f'{fiscal_year_label}目標 (平日ベース)',
             '目標達成率予測'
         ],
@@ -369,9 +373,9 @@ def create_forecast_summary_table(result_df, target_dict=None, department=None):
             f"{target_achievement_rate:.1f}%" if target_achievement_rate else "算出不可"
         ],
         '備考': [
-            f"{fiscal_year_start.strftime('%Y/%m/%d')}以降の実績",
-            f"年度末までの予測累計",
-            f"年度内実績 + 予測の合計",
+            actual_calculation_method,
+            "予測日平均 × 各月の全日数",
+            "年度内実績 + 予測の合計",
             "週次目標 × 52週（平日ベース）",
             "全日予測 vs 平日目標での比較"
         ]

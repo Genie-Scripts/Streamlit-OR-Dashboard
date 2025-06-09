@@ -454,7 +454,7 @@ def render_prediction_page(df, target_dict, latest_date):
                     
                     try:
                         summary_df, monthly_df = generic_plots.create_forecast_summary_table(
-                            result_df, target_dict, department
+                            result_df, target_dict, department, source_df=df  # 生データを渡す
                         )
                         
                         if not summary_df.empty:
