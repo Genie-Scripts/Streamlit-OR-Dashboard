@@ -437,5 +437,5 @@ def calculate_cumulative_cases(df, target_weekly_cases):
     weekly_df['累積実績'] = weekly_df['週次実績'].cumsum()
     weekly_df['経過週'] = np.arange(len(weekly_df)) + 1
     weekly_df['累積目標'] = weekly_df['経過週'] * target_weekly_cases
-    
+
     return weekly_df[['週', '週次実績', '累積実績', '累積目標']]

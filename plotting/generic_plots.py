@@ -469,5 +469,5 @@ def plot_cumulative_cases_chart(cumulative_data, title):
         showlegend=True,
         legend=dict(x=0.02, y=0.98)
     )
-    
+
     return fig
