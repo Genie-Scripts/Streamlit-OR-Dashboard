@@ -293,7 +293,7 @@ def get_kpi_summary(df, latest_date):
     return {
         "全身麻酔手術件数 (直近4週)": gas_total_cases,
         "全手術件数 (直近4週)": all_total_cases,
-        "平日1日あたり平均全身麻酔手術件数": f"{gas_avg_cases_per_weekday:.1f}",
+        "平日1日あたり全身麻酔手術件数": f"{gas_avg_cases_per_weekday:.1f}",
         "手術室稼働率 (全手術、平日のみ)": f"{utilization_rate:.1f}%"
     }
 

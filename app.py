@@ -1,4 +1,4 @@
-# app.py (v5.6 週単位分析対応版)
+# app.py (v6.0 データ永続化対応版)
 import streamlit as st
 import pandas as pd
 import traceback
@@ -13,6 +13,11 @@ from analysis import weekly, periodic, ranking, surgeon, forecasting
 from plotting import trend_plots, generic_plots
 from reporting import csv_exporter, pdf_exporter
 from utils import date_helpers
+from data_persistence import (
+    auto_load_data, save_data_to_file, load_data_from_file, delete_saved_data,
+    get_data_info, get_file_sizes, get_backup_info, restore_from_backup,
+    export_data_package, import_data_package, create_backup
+)
 
 # --- ページ設定 (必ず最初に実行) ---
 st.set_page_config(
@@ -26,38 +31,95 @@ def initialize_session_state():
     if 'target_dict' not in st.session_state: st.session_state['target_dict'] = {}
     if 'latest_date' not in st.session_state: st.session_state['latest_date'] = None
     if 'current_view' not in st.session_state: st.session_state['current_view'] = 'ダッシュボード'
+    if 'data_loaded_from_file' not in st.session_state: st.session_state['data_loaded_from_file'] = False
+    if 'data_source' not in st.session_state: st.session_state['data_source'] = 'unknown'
+    
+    # アプリ起動時の自動データ読み込み
+    if not st.session_state.get('auto_load_attempted', False):
+        st.session_state['auto_load_attempted'] = True
+        if auto_load_data():
+            st.session_state['data_loaded_from_file'] = True
+            st.session_state['data_source'] = 'auto_loaded'
+            # データがロードされた場合、セッション変数を更新
+            df = st.session_state.get('df')
+            target_data = st.session_state.get('target_data')
+            if df is not None and not df.empty:
+                st.session_state['processed_df'] = df
+                st.session_state['target_dict'] = target_data or {}
+                if '手術実施日_dt' in df.columns:
+                    st.session_state['latest_date'] = df['手術実施日_dt'].max()
 
 # --- UI描画関数 ---
 def render_sidebar():
     with st.sidebar:
         st.title("🏥 手術分析")
         st.markdown("---")
-        views = ["ダッシュボード", "データアップロード", "病院全体分析", "診療科別分析", "術者分析", "将来予測"]
-        st.session_state['current_view'] = st.radio("📍 ナビゲーション", views, key="navigation")
-        st.markdown("---")
+        
+        # データの状態表示（強化版）
+        data_info = get_data_info()
         if not st.session_state.get('processed_df', pd.DataFrame()).empty:
             st.success("✅ データ読み込み済み")
             st.write(f"📊 レコード数: {len(st.session_state['processed_df']):,}")
-            if st.session_state.get('latest_date'): st.write(f"📅 最新日付: {st.session_state['latest_date'].strftime('%Y/%m/%d')}")
-        else: st.warning("⚠️ データ未読み込み")
-        if st.session_state.get('target_dict'): st.success("🎯 目標データ設定済み")
-        else: st.info("目標データ未設定")
+            if st.session_state.get('latest_date'): 
+                st.write(f"📅 最新日付: {st.session_state['latest_date'].strftime('%Y/%m/%d')}")
+            
+            # データソースの表示
+            data_source = st.session_state.get('data_source', 'unknown')
+            if data_source == 'auto_loaded':
+                st.info("💾 保存データを自動読み込み")
+            elif data_source == 'file_upload':
+                st.info("📤 新規データをアップロード")
+            elif data_source == 'restored':
+                st.info("🔄 バックアップから復元")
+                
+            # 保存データの情報
+            if data_info:
+                last_saved = data_info.get('last_saved', 'unknown')
+                if last_saved != 'unknown':
+                    try:
+                        saved_time = datetime.fromisoformat(last_saved.replace('Z', '+00:00'))
+                        st.caption(f"💾 保存: {saved_time.strftime('%m/%d %H:%M')}")
+                    except:
+                        st.caption(f"💾 保存済み")
+        else:
+            st.warning("⚠️ データ未読み込み")
+            if data_info:
+                st.info("💾 保存データあり - データ管理で確認")
+        
+        if st.session_state.get('target_dict'): 
+            st.success("🎯 目標データ設定済み")
+        else: 
+            st.info("目標データ未設定")
+        
         st.markdown("---")
-        st.info("Version: 5.6 (週単位分析対応)")
+        
+        # ナビゲーション
+        views = ["ダッシュボード", "データアップロード", "データ管理", "病院全体分析", "診療科別分析", "術者分析", "将来予測"]
+        st.session_state['current_view'] = st.radio("📍 ナビゲーション", views, key="navigation")
+        
+        st.markdown("---")
+        st.info("Version: 6.0 (データ永続化対応)")
         jst = pytz.timezone('Asia/Tokyo')
         st.write(f"現在時刻: {datetime.now(jst).strftime('%H:%M:%S')}")
 
 def render_page_content():
     current_view = st.session_state.get('current_view', 'ダッシュボード')
+    
     if current_view == 'データアップロード':
         render_upload_page()
         return
+    elif current_view == 'データ管理':
+        render_data_management_page()
+        return
+    
     df = st.session_state.get('processed_df')
     if df is None or df.empty:
-        st.warning("分析を開始するには、「データアップロード」ページでデータを読み込んでください。")
+        st.warning("分析を開始するには、「データアップロード」ページでデータを読み込むか、「データ管理」ページで保存データを読み込んでください。")
         return
+        
     target_dict = st.session_state.get('target_dict', {})
     latest_date = st.session_state.get('latest_date')
+    
     page_map = {
         "ダッシュボード": render_dashboard_page,
         "病院全体分析": render_hospital_page,
@@ -65,27 +127,254 @@ def render_page_content():
         "術者分析": render_surgeon_page,
         "将来予測": render_prediction_page,
     }
+    
     page_func = page_map.get(current_view)
-    if page_func: page_func(df, target_dict, latest_date)
+    if page_func: 
+        page_func(df, target_dict, latest_date)
 
 def render_upload_page():
     st.header("📤 データアップロード")
+    
+    # 既存の保存データがある場合の警告
+    data_info = get_data_info()
+    if data_info:
+        st.warning("💾 既に保存されたデータがあります。新しいデータをアップロードすると上書きされます。")
+        with st.expander("保存データの詳細"):
+            st.json(data_info)
+    
     base_file = st.file_uploader("基礎データ (CSV)", type="csv")
     update_files = st.file_uploader("追加データ (CSV)", type="csv", accept_multiple_files=True)
     target_file = st.file_uploader("目標データ (CSV)", type="csv")
+    
+    # データ保存設定
+    st.subheader("📁 データ保存設定")
+    col1, col2 = st.columns(2)
+    with col1:
+        auto_save = st.checkbox("処理完了後にデータを自動保存", value=True, help="次回起動時に自動でデータが読み込まれます")
+    with col2:
+        create_backup_checkbox = st.checkbox("処理前にバックアップを作成", value=True, help="現在のデータをバックアップしてから新データを処理します")
+    
     if st.button("データ処理を実行", type="primary"):
         with st.spinner("データ処理中..."):
             try:
+                # バックアップ作成
+                if create_backup_checkbox:
+                    backup_success = create_backup(force_create=True)
+                    if backup_success:
+                        st.success("✅ バックアップを作成しました")
+                    else:
+                        st.warning("⚠️ バックアップ作成に失敗しましたが、処理を続行します")
+                
+                # データ処理
                 if base_file:
                     df = loader.load_and_merge_files(base_file, update_files)
                     st.session_state['processed_df'] = df
-                    if not df.empty: st.session_state['latest_date'] = df['手術実施日_dt'].max()
-                    st.success(f"データ処理完了。{len(df)}件のレコードが読み込まれました。")
-                else: st.warning("基礎データファイルをアップロードしてください。")
-                if target_file:
-                    st.session_state['target_dict'] = target_loader.load_target_file(target_file)
-                    st.success(f"目標データを読み込みました。{len(st.session_state['target_dict'])}件の診療科目標を設定。")
-            except Exception as e: st.error(f"エラー: {e}"); st.code(traceback.format_exc())
+                    st.session_state['data_source'] = 'file_upload'
+                    
+                    if not df.empty: 
+                        st.session_state['latest_date'] = df['手術実施日_dt'].max()
+                    
+                    st.success(f"✅ データ処理完了。{len(df)}件のレコードが読み込まれました。")
+                    
+                    # 目標データの処理
+                    target_dict = {}
+                    if target_file:
+                        target_dict = target_loader.load_target_file(target_file)
+                        st.session_state['target_dict'] = target_dict
+                        st.success(f"✅ 目標データを読み込みました。{len(target_dict)}件の診療科目標を設定。")
+                    
+                    # 自動保存
+                    if auto_save:
+                        save_success = save_data_to_file(df, target_dict, {
+                            'upload_time': datetime.now().isoformat(),
+                            'base_file_name': base_file.name,
+                            'update_files_count': len(update_files) if update_files else 0,
+                            'target_file_name': target_file.name if target_file else None
+                        })
+                        
+                        if save_success:
+                            st.success("💾 データを保存しました。次回起動時に自動で読み込まれます。")
+                        else:
+                            st.error("❌ データ保存に失敗しました。")
+                else:
+                    st.warning("基礎データファイルをアップロードしてください。")
+                    
+            except Exception as e:
+                st.error(f"エラー: {e}")
+                st.code(traceback.format_exc())
+
+def render_data_management_page():
+    st.header("💾 データ管理")
+    
+    # データ状態の表示
+    data_info = get_data_info()
+    file_sizes = get_file_sizes()
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["データ状態", "バックアップ管理", "データエクスポート/インポート", "詳細設定"])
+    
+    with tab1:
+        st.subheader("📊 現在のデータ状態")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if data_info:
+                st.success("💾 保存データあり")
+                st.json(data_info)
+                
+                if st.button("💾 保存データを読み込み", type="primary"):
+                    with st.spinner("データ読み込み中..."):
+                        df, target_data, metadata = load_data_from_file()
+                        if df is not None and not df.empty:
+                            st.session_state['processed_df'] = df
+                            st.session_state['target_dict'] = target_data or {}
+                            st.session_state['data_source'] = 'manual_load'
+                            if '手術実施日_dt' in df.columns:
+                                st.session_state['latest_date'] = df['手術実施日_dt'].max()
+                            st.success("✅ データを読み込みました")
+                            st.rerun()
+                        else:
+                            st.error("❌ データ読み込みに失敗しました")
+            else:
+                st.info("💿 保存データなし")
+                st.write("データアップロードページで新規データを処理してください。")
+        
+        with col2:
+            if file_sizes:
+                st.subheader("📁 ファイルサイズ")
+                for name, size in file_sizes.items():
+                    st.write(f"• {name}: {size}")
+            
+            # 現在のセッションデータの状態
+            st.subheader("🖥️ セッション状態")
+            df = st.session_state.get('processed_df')
+            if df is not None and not df.empty:
+                st.write(f"• レコード数: {len(df):,}")
+                st.write(f"• データソース: {st.session_state.get('data_source', 'unknown')}")
+                if st.session_state.get('latest_date'):
+                    st.write(f"• 最新日付: {st.session_state['latest_date'].strftime('%Y/%m/%d')}")
+                
+                # 現在のデータを保存
+                if st.button("💾 現在のデータを保存"):
+                    save_success = save_data_to_file(df, st.session_state.get('target_dict'), {
+                        'manual_save_time': datetime.now().isoformat(),
+                        'save_source': 'manual'
+                    })
+                    if save_success:
+                        st.success("✅ データを保存しました")
+                    else:
+                        st.error("❌ 保存に失敗しました")
+            else:
+                st.info("セッションにデータがありません")
+    
+    with tab2:
+        st.subheader("🔄 バックアップ管理")
+        
+        backup_info = get_backup_info()
+        
+        if backup_info:
+            st.write(f"📂 {len(backup_info)}個のバックアップファイル")
+            
+            for i, backup in enumerate(backup_info):
+                with st.expander(f"📄 {backup['timestamp']} ({backup['size']})"):
+                    col1, col2, col3 = st.columns([2, 1, 1])
+                    
+                    with col1:
+                        st.write(f"**ファイル名**: {backup['filename']}")
+                        st.write(f"**サイズ**: {backup['size']}")
+                        st.write(f"**作成日**: {backup['timestamp']}")
+                        st.write(f"**経過日数**: {backup['age_days']}日")
+                        if backup['has_metadata']:
+                            st.write("✅ メタデータあり")
+                    
+                    with col2:
+                        if st.button("🔄 復元", key=f"restore_{i}"):
+                            success, message = restore_from_backup(backup['filename'])
+                            if success:
+                                st.success(f"✅ {message}")
+                                st.session_state['data_source'] = 'restored'
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {message}")
+                    
+                    with col3:
+                        if st.button("📥 ダウンロード", key=f"download_{i}"):
+                            with open(backup['path'], 'rb') as f:
+                                st.download_button(
+                                    label="💾 ダウンロード開始",
+                                    data=f.read(),
+                                    file_name=backup['filename'],
+                                    mime="application/octet-stream",
+                                    key=f"download_btn_{i}"
+                                )
+        else:
+            st.info("📭 バックアップファイルがありません")
+        
+        # 手動バックアップ作成
+        st.subheader("📦 手動バックアップ作成")
+        if st.button("🔄 現在のデータをバックアップ"):
+            backup_success = create_backup(force_create=True)
+            if backup_success:
+                st.success("✅ バックアップを作成しました")
+            else:
+                st.error("❌ バックアップ作成に失敗しました")
+    
+    with tab3:
+        st.subheader("📤 データエクスポート")
+        
+        if st.button("📦 データパッケージをエクスポート"):
+            with st.spinner("エクスポート中..."):
+                success, result = export_data_package()
+                if success:
+                    st.success("✅ エクスポート完了")
+                    with open(result, 'rb') as f:
+                        st.download_button(
+                            label="💾 エクスポートファイルをダウンロード",
+                            data=f.read(),
+                            file_name=result,
+                            mime="application/zip"
+                        )
+                else:
+                    st.error(f"❌ エクスポート失敗: {result}")
+        
+        st.subheader("📥 データインポート")
+        st.info("⚠️ インポートすると現在のデータが上書きされます。事前にバックアップを作成することをお勧めします。")
+        
+        import_file = st.file_uploader("データパッケージファイル (ZIP)", type="zip")
+        
+        if import_file and st.button("📥 インポート実行"):
+            with st.spinner("インポート中..."):
+                success, message = import_data_package(import_file)
+                if success:
+                    st.success(f"✅ {message}")
+                    st.info("🔄 ページを再読み込みしてデータを確認してください")
+                else:
+                    st.error(f"❌ {message}")
+    
+    with tab4:
+        st.subheader("⚙️ 詳細設定")
+        
+        # データ削除
+        st.subheader("🗑️ データ削除")
+        st.warning("⚠️ この操作は元に戻せません。全ての保存データとバックアップが削除されます。")
+        
+        if st.checkbox("削除を確認しました"):
+            if st.button("🗑️ 全データを削除", type="secondary"):
+                success, result = delete_saved_data()
+                if success:
+                    st.success(f"✅ 削除完了: {', '.join(result)}")
+                    # セッション状態もクリア
+                    for key in ['processed_df', 'target_dict', 'latest_date', 'data_source']:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    st.rerun()
+                else:
+                    st.error(f"❌ 削除失敗: {result}")
+        
+        # システム情報
+        st.subheader("ℹ️ システム情報")
+        st.write(f"• Streamlit バージョン: {st.__version__}")
+        st.write(f"• Python バージョン: {pd.__version__}")
 
 def render_dashboard_page(df, target_dict, latest_date):
     st.title("🏠 ダッシュボード")
