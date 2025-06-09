@@ -6,8 +6,9 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime
 import json
-import shutil
+import shutil  # 標準ライブラリ
 import logging
+from pathlib import Path  # 標準ライブラリ（pathlib2不要）
 
 # ===== 設定 =====
 DATA_DIR = "saved_data"

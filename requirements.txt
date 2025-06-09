@@ -1,4 +1,4 @@
-# requirements.txt (データ永続化対応版)
+# requirements.txt (Python 3.11対応版)
 
 # 基本ライブラリ
 streamlit>=1.28.0
@@ -18,11 +18,10 @@ seaborn>=0.11.0
 # 日付処理
 python-dateutil>=2.8.0
 
-# 時系列予測
-prophet>=1.1.0  # Facebook Prophet (オプション)
+# 時系列予測（オプション - 重いので必要に応じてコメントアウト）
+# prophet>=1.1.0  
 
 # ファイル処理・永続化
-pickle5>=0.0.11  # Python 3.7以下で必要
 openpyxl>=3.0.0  # Excel読み込み
 xlrd>=2.0.0      # 古いExcelファイル対応
 
@@ -32,12 +31,8 @@ fpdf2>=2.5.0
 
 # その他ユーティリティ
 pytz>=2022.1    # タイムゾーン処理
-pathlib2>=2.3.0 # パス処理（古いPython対応）
-shutil           # 標準ライブラリ（念のため明記）
 
-# 開発・デバッグ用（オプション）
-# jupyter>=1.0.0
-# ipython>=8.0.0
-
-# セキュリティ・暗号化（データ保護強化用、オプション）
-# cryptography>=3.4.0
+# 注意: 以下は標準ライブラリのため不要
+# - shutil (標準ライブラリ)
+# - pickle5 (Python 3.8以上では標準のpickleを使用)
+# - pathlib2 (Python 3.4以上では標準のpathlibを使用)
