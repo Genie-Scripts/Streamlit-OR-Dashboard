@@ -129,18 +129,6 @@ def create_forecast_chart(result_df, title):
     if result_df.empty:
         return go.Figure()
     
-    # デバッグ情報を追加
-    st.write("**予測データのデバッグ情報:**")
-    st.write(f"データフレームの列: {list(result_df.columns)}")
-    st.write(f"データフレームの形状: {result_df.shape}")
-    st.write("**全データ:**")
-    st.dataframe(result_df)
-    
-    # 種別ごとのデータ数を確認
-    if '種別' in result_df.columns:
-        st.write("**種別ごとのデータ数:**")
-        st.write(result_df['種別'].value_counts())
-    
     fig = go.Figure()
     
     # データ構造を確認して実績・予測を分離
@@ -149,25 +137,36 @@ def create_forecast_chart(result_df, title):
         actual_df = result_df[result_df['種別'] == '実績'].copy()
         forecast_df = result_df[result_df['種別'] == '予測'].copy()
         
-        # 正しい列名を使用
-        date_col = 'month_start'
+        # 日付列を適切に選択（予測データでは'月'列を優先）
         value_col = '値'
         
-        st.write(f"**実績データ数: {len(actual_df)}, 予測データ数: {len(forecast_df)}**")
+        # 実績データ用の日付列
+        actual_date_col = 'month_start'
+        
+        # 予測データ用の日付列（'月'列を優先、なければ'month_start'）
+        if '月' in forecast_df.columns and forecast_df['月'].notna().any():
+            forecast_date_col = '月'
+        else:
+            forecast_date_col = 'month_start'
         
         # 実績と予測の間に連続性を保つため、実績の最終点を予測の先頭に追加
         if not actual_df.empty and not forecast_df.empty:
             connector = actual_df.tail(1).copy()
-            connector['種別'] = '予測'  # 種別を予測に変更
+            connector['種別'] = '予測'
+            
+            # 予測データで'月'列を使用する場合、connectorの'月'列も設定
+            if forecast_date_col == '月':
+                connector['月'] = connector['month_start']
+            
             forecast_df = pd.concat([connector, forecast_df], ignore_index=True)
-            st.write(f"**連続性調整後の予測データ数: {len(forecast_df)}**")
             
     elif 'タイプ' in result_df.columns:
         # 'タイプ'列がある場合の処理（レガシー対応）
         actual_df = result_df[result_df['タイプ'] == '実績'].copy()
         forecast_df = result_df[result_df['タイプ'] == '予測'].copy()
         
-        date_col = '月' if '月' in result_df.columns else 'month_start'
+        actual_date_col = '月' if '月' in actual_df.columns else 'month_start'
+        forecast_date_col = '月' if '月' in forecast_df.columns else 'month_start'
         value_col = '値'
         
     else:
@@ -175,14 +174,14 @@ def create_forecast_chart(result_df, title):
         actual_df = pd.DataFrame()
         forecast_df = result_df.copy()
         
-        date_col = 'month_start' if 'month_start' in result_df.columns else result_df.columns[0]
+        actual_date_col = 'month_start'
+        forecast_date_col = '月' if '月' in forecast_df.columns else 'month_start'
         value_col = '値' if '値' in result_df.columns else result_df.columns[1]
     
     # 実績データのプロット
     if not actual_df.empty:
-        st.write(f"**実績データの期間:** {actual_df[date_col].min()} ～ {actual_df[date_col].max()}")
         fig.add_trace(go.Scatter(
-            x=actual_df[date_col], 
+            x=actual_df[actual_date_col], 
             y=actual_df[value_col], 
             name='実績',
             mode='lines+markers',
@@ -192,9 +191,8 @@ def create_forecast_chart(result_df, title):
     
     # 予測データのプロット
     if not forecast_df.empty:
-        st.write(f"**予測データの期間:** {forecast_df[date_col].min()} ～ {forecast_df[date_col].max()}")
         fig.add_trace(go.Scatter(
-            x=forecast_df[date_col], 
+            x=forecast_df[forecast_date_col], 
             y=forecast_df[value_col], 
             name='予測',
             mode='lines+markers',
