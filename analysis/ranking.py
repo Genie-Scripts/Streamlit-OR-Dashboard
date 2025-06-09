@@ -265,31 +265,54 @@ def get_kpi_summary(df, latest_date):
         (df['手術実施日_dt'] <= analysis_end_date)
     ]
     
+    # 【確認】各KPIの対象データを明確化
+    
+    # 1. 全身麻酔手術のみのデータ
     gas_df = recent_df[recent_df['is_gas_20min']]
+    
+    # 2. 全手術データ（全身麻酔以外も含む）
+    all_surgery_df = recent_df.copy()
     
     if gas_df.empty:
         return {}
     
     # 基本統計（完全4週間）
-    total_cases = len(gas_df)
     weeks_in_period = 4  # 完全4週間
     days_in_period = 28  # 完全4週間
-    daily_average = total_cases / days_in_period
-    weekly_average = total_cases / weeks_in_period
     
-    # 平日のみの統計
-    weekday_df = gas_df[gas_df['is_weekday']]
+    # 全身麻酔手術の統計
+    gas_total_cases = len(gas_df)
+    gas_daily_average = gas_total_cases / days_in_period
+    
+    # 全身麻酔手術の平日のみの統計
+    gas_weekday_df = gas_df[gas_df['is_weekday']]
     weekdays_in_period = 20  # 4週間 × 5平日
-    avg_cases_per_weekday = len(weekday_df) / weekdays_in_period
+    gas_avg_cases_per_weekday = len(gas_weekday_df) / weekdays_in_period
     
-    # 実際の手術室稼働率を計算
+    # 全手術の統計
+    all_total_cases = len(all_surgery_df)
+    all_daily_average = all_total_cases / days_in_period
+    
+    # 全手術の平日のみの統計
+    all_weekday_df = all_surgery_df[all_surgery_df['is_weekday']]
+    all_avg_cases_per_weekday = len(all_weekday_df) / weekdays_in_period
+    
+    # 手術室稼働率（全手術対象、平日のみ）
     utilization_rate = calculate_operating_room_utilization(df, recent_df)
     
+    # KPIデータの対象を明確に表示
     return {
-        "総手術件数 (直近4週)": total_cases,
-        "1日あたり平均件数": f"{daily_average:.1f}",
-        "平日1日あたり平均件数": f"{avg_cases_per_weekday:.1f}",
-        "手術室稼働率": f"{utilization_rate:.1f}%"
+        "総手術件数 (直近4週)": f"{gas_total_cases} (全身麻酔のみ)",
+        "1日あたり平均件数": f"{gas_daily_average:.1f} (全身麻酔のみ)",
+        "平日1日あたり平均件数": f"{gas_avg_cases_per_weekday:.1f} (全身麻酔のみ)",
+        "手術室稼働率": f"{utilization_rate:.1f}% (全手術、平日のみ)",
+        
+        # 詳細情報（参考値）
+        "_詳細_全手術件数": f"{all_total_cases}件",
+        "_詳細_全手術日平均": f"{all_daily_average:.1f}件/日",
+        "_詳細_全手術平日平均": f"{all_avg_cases_per_weekday:.1f}件/日",
+        "_詳細_全身麻酔平日件数": f"{len(gas_weekday_df)}件",
+        "_詳細_全手術平日件数": f"{len(all_weekday_df)}件"
     }
 
 def get_department_performance_summary(df, target_dict, latest_date):
