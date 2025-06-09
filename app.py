@@ -289,6 +289,10 @@ def render_surgeon_page(df, target_dict, latest_date):
 
 def render_prediction_page(df, target_dict, latest_date):
     st.title("🔮 将来予測")
+    
+    # 予測対象の説明を追加
+    st.info("📊 **予測対象**: 全身麻酔手術（20分以上）のみを対象としています")
+    
     tab1, tab2, tab3 = st.tabs(["将来予測", "モデル検証", "パラメータ最適化"])
 
     with tab1:
@@ -300,14 +304,51 @@ def render_prediction_page(df, target_dict, latest_date):
             department = st.selectbox("診療科を選択", departments, key="pred_dept_select")
         model_type = st.selectbox("予測モデル", ["hwes", "arima", "moving_avg"], format_func=lambda x: {"hwes":"Holt-Winters", "arima":"ARIMA", "moving_avg":"移動平均"}[x])
         pred_period = st.selectbox("予測期間", ["fiscal_year", "calendar_year", "six_months"], format_func=lambda x: {"fiscal_year":"年度末まで", "calendar_year":"年末まで", "six_months":"6ヶ月先まで"}[x])
+        
         if st.button("予測を実行", type="primary", key="run_prediction"):
             with st.spinner("予測計算中..."):
                 result_df, metrics = forecasting.predict_future(df, latest_date, department=department, model_type=model_type, prediction_period=pred_period)
-                if metrics.get("message"): st.warning(metrics["message"])
+                
+                if metrics.get("message"):
+                    st.warning(metrics["message"])
                 else:
                     title = f"{department or '病院全体'} {metrics.get('予測モデル','')}モデルによる予測"
+                    
+                    # グラフ表示
                     fig = generic_plots.create_forecast_chart(result_df, title)
-                    st.plotly_chart(fig, use_container_width=True); st.write(metrics)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # 予測サマリーテーブル表示
+                    st.header("📋 予測サマリー")
+                    
+                    try:
+                        summary_df, monthly_df = generic_plots.create_forecast_summary_table(
+                            result_df, target_dict, department
+                        )
+                        
+                        if not summary_df.empty:
+                            col1, col2 = st.columns([1, 1])
+                            
+                            with col1:
+                                st.subheader("年度予測サマリー")
+                                st.dataframe(summary_df, hide_index=True, use_container_width=True)
+                            
+                            with col2:
+                                st.subheader("月別予測詳細")
+                                if not monthly_df.empty:
+                                    st.dataframe(monthly_df, hide_index=True, use_container_width=True)
+                                else:
+                                    st.info("月別予測データがありません")
+                        else:
+                            st.info("予測サマリーを生成できませんでした")
+                            
+                    except Exception as e:
+                        st.error(f"サマリーテーブル生成エラー: {str(e)}")
+                    
+                    # モデル評価指標表示
+                    st.header("📊 モデル評価指標")
+                    st.write(metrics)
+                    
     with tab2:
         st.header("予測モデルの精度検証")
         val_target = st.radio("検証対象", ["病院全体", "診療科別"], horizontal=True, key="val_target")

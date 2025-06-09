@@ -211,6 +211,78 @@ def create_forecast_chart(result_df, title):
     
     return fig
 
+def create_forecast_summary_table(result_df, target_dict=None, department=None):
+    """
+    予測結果のサマリーテーブルを作成
+    """
+    if result_df.empty or '種別' not in result_df.columns:
+        return pd.DataFrame()
+    
+    # 実績と予測を分離
+    actual_df = result_df[result_df['種別'] == '実績'].copy()
+    forecast_df = result_df[result_df['種別'] == '予測'].copy()
+    
+    # 予測データのみを使用（実績は除外）
+    pure_forecast_df = forecast_df[forecast_df.index > 0] if len(forecast_df) > 1 else forecast_df
+    
+    if actual_df.empty and pure_forecast_df.empty:
+        return pd.DataFrame()
+    
+    # 年度内の実績累計を計算
+    actual_total = actual_df['値'].sum() if not actual_df.empty else 0
+    
+    # 年度内の予測累計を計算
+    forecast_total = pure_forecast_df['値'].sum() if not pure_forecast_df.empty else 0
+    
+    # 年度合計予測
+    year_total_forecast = actual_total + forecast_total
+    
+    # 目標との比較（年度目標を週次目標から算出）
+    annual_target = None
+    target_achievement_rate = None
+    
+    if target_dict and department and department in target_dict:
+        weekly_target = target_dict[department]
+        annual_target = weekly_target * 52  # 年間52週
+        target_achievement_rate = (year_total_forecast / annual_target) * 100 if annual_target > 0 else 0
+    
+    # サマリーテーブル作成
+    summary_data = {
+        '項目': [
+            '年度内実績累計',
+            '年度内予測累計', 
+            '年度合計予測',
+            '年度目標',
+            '目標達成率予測'
+        ],
+        '値': [
+            f"{actual_total:.0f}件",
+            f"{forecast_total:.0f}件",
+            f"{year_total_forecast:.0f}件",
+            f"{annual_target:.0f}件" if annual_target else "未設定",
+            f"{target_achievement_rate:.1f}%" if target_achievement_rate else "算出不可"
+        ]
+    }
+    
+    # 月別予測詳細
+    monthly_details = []
+    if not pure_forecast_df.empty:
+        for _, row in pure_forecast_df.iterrows():
+            if '月' in row and pd.notna(row['月']):
+                date_str = pd.to_datetime(row['月']).strftime('%Y年%m月')
+            else:
+                date_str = "不明"
+            
+            monthly_details.append({
+                '予測期間': date_str,
+                '予測件数': f"{row['値']:.1f}件"
+            })
+    
+    summary_df = pd.DataFrame(summary_data)
+    monthly_df = pd.DataFrame(monthly_details)
+    
+    return summary_df, monthly_df
+
 def create_validation_chart(train_data, test_data, predictions):
     """
     モデル検証結果のグラフを作成
