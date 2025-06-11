@@ -1,280 +1,374 @@
+# ui/pages/surgeon_page.py
+"""
+術者分析ページモジュール
+術者別のパフォーマンス分析を表示
+"""
+
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Any, Optional
+import logging
 
-# 既存モジュールのインポート
+from ui.session_manager import SessionManager
+from ui.error_handler import safe_streamlit_operation, safe_data_operation
+
+# 既存の分析モジュールをインポート
 from analysis import weekly, surgeon
 from plotting import trend_plots, generic_plots
-from ..components import chart_container
-from ..error_handler import with_error_handling, ErrorHandler
 
-@with_error_handling("術者分析ページ描画")
-def render(df: pd.DataFrame, target_dict: Dict, latest_date: Optional[datetime]) -> None:
-    """術者分析ページを描画"""
-    
-    st.title("👨‍⚕️ 術者分析")
-    
-    # データ検証
-    if not _validate_surgeon_data(df):
-        return
-    
-    # 分析タイプ選択
-    analysis_type = st.radio(
-        "📊 分析タイプ",
-        ["診療科別ランキング", "術者ごと時系列"],
-        horizontal=True,
-        help="術者データの表示方法を選択してください"
-    )
-    
-    # 術者データの準備
-    expanded_df = _prepare_surgeon_data(df)
-    if expanded_df.empty:
-        return
-    
-    # 選択された分析タイプに応じて表示
-    if analysis_type == "診療科別ランキング":
-        _render_department_ranking(expanded_df)
-    else:
-        _render_surgeon_timeseries(expanded_df)
+logger = logging.getLogger(__name__)
 
-def _validate_surgeon_data(df: pd.DataFrame) -> bool:
-    """術者データの検証"""
-    if df.empty:
-        ErrorHandler.display_warning("表示するデータがありません", "術者分析")
-        return False
-    
-    required_columns = ['実施診療科']
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    
-    if missing_columns:
-        ErrorHandler.display_error(
-            ValueError(f"必要な列が不足しています: {missing_columns}"),
-            "術者分析"
-        )
-        return False
-    
-    return True
 
-@with_error_handling("術者データ準備", show_spinner=True, spinner_text="術者データを準備中...")
-def _prepare_surgeon_data(df: pd.DataFrame) -> pd.DataFrame:
-    """術者データを準備"""
-    try:
-        expanded_df = surgeon.get_expanded_surgeon_df(df)
-        return expanded_df
-    except Exception as e:
-        ErrorHandler.display_error(e, "術者データ準備")
-        return pd.DataFrame()
-
-@with_error_handling("診療科別ランキング表示")
-def _render_department_ranking(expanded_df: pd.DataFrame) -> None:
-    """診療科別ランキングを表示"""
-    st.header("🏆 診療科別術者ランキング")
+class SurgeonPage:
+    """術者分析ページクラス"""
     
-    # フィルタ設定
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        departments = ["全診療科"] + sorted(expanded_df["実施診療科"].dropna().unique())
-        selected_dept = st.selectbox(
-            "🏥 診療科で絞り込み",
-            departments,
-            help="特定の診療科に絞り込むか、全診療科を表示するか選択してください"
-        )
-    
-    with col2:
-        top_n = st.slider(
-            "📊 表示する術者数（上位）",
-            min_value=5,
-            max_value=50,
-            value=15,
-            step=5,
-            help="ランキングに表示する術者の数を設定してください"
-        )
-    
-    # データのフィルタリング
-    target_df = expanded_df
-    if selected_dept != "全診療科":
-        target_df = expanded_df[expanded_df['実施診療科'] == selected_dept]
-    
-    if target_df.empty:
-        st.warning(f"📊 {selected_dept}のデータがありません")
-        return
-    
-    # ランキング生成と表示
-    try:
-        summary_df = surgeon.get_surgeon_summary(target_df)
+    @staticmethod
+    @safe_streamlit_operation("術者分析ページ描画")
+    def render() -> None:
+        """術者分析ページを描画"""
+        st.title("👨‍⚕️ 術者分析")
         
-        if summary_df.empty:
-            st.warning(f"📊 {selected_dept}の術者サマリーを生成できませんでした")
+        # データ取得
+        df = SessionManager.get_processed_df()
+        target_dict = SessionManager.get_target_dict()
+        latest_date = SessionManager.get_latest_date()
+        
+        # 分析タイプ選択
+        analysis_type = st.radio(
+            "分析タイプ", 
+            ["診療科別ランキング", "術者ごと時系列"], 
+            horizontal=True,
+            help="分析の種類を選択してください"
+        )
+        
+        # 術者データの準備
+        expanded_df = SurgeonPage._prepare_surgeon_data(df)
+        if expanded_df.empty:
+            st.warning("分析可能な術者データがありません。")
             return
         
-        # グラフ表示
-        with chart_container.create_chart_container():
-            fig = generic_plots.plot_surgeon_ranking(summary_df, top_n, selected_dept)
-            st.plotly_chart(fig, use_container_width=True)
+        if analysis_type == "診療科別ランキング":
+            SurgeonPage._render_ranking_analysis(expanded_df)
+        else:  # 術者ごと時系列
+            SurgeonPage._render_individual_surgeon_analysis(expanded_df)
+    
+    @staticmethod
+    @safe_data_operation("術者データ準備")
+    def _prepare_surgeon_data(df: pd.DataFrame) -> pd.DataFrame:
+        """術者データを準備"""
+        try:
+            with st.spinner("術者データを準備中..."):
+                expanded_df = surgeon.get_expanded_surgeon_df(df)
+                return expanded_df
+                
+        except Exception as e:
+            st.error(f"術者データ準備エラー: {e}")
+            logger.error(f"術者データ準備エラー: {e}")
+            return pd.DataFrame()
+    
+    @staticmethod
+    @safe_data_operation("ランキング分析")
+    def _render_ranking_analysis(expanded_df: pd.DataFrame) -> None:
+        """診療科別ランキング分析を表示"""
+        st.subheader("🏆 術者別ランキング")
         
-        # データ詳細表示
-        _display_ranking_details(summary_df, selected_dept, top_n)
+        # フィルタオプション
+        col1, col2 = st.columns(2)
         
-    except Exception as e:
-        ErrorHandler.display_error(e, f"{selected_dept} ランキング生成")
-
-def _display_ranking_details(
-    summary_df: pd.DataFrame, 
-    selected_dept: str, 
-    top_n: int
-) -> None:
-    """ランキング詳細データを表示"""
-    with st.expander(f"📋 {selected_dept} 術者詳細データ (Top {top_n})"):
-        display_df = summary_df.head(top_n).copy()
-        
-        # カラム名を日本語に変更
-        column_mapping = {
-            '実施術者': '術者名',
-            '手術件数': '件数',
-            '実施診療科': '診療科'
-        }
-        
-        display_df = display_df.rename(columns=column_mapping)
-        
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        # サマリー統計
-        total_surgeons = len(summary_df)
-        total_cases = summary_df['手術件数'].sum() if '手術件数' in summary_df.columns else 0
-        
-        col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("👨‍⚕️ 総術者数", f"{total_surgeons}人")
-        with col2:
-            st.metric("📊 総手術件数", f"{total_cases:,}件")
-        with col3:
-            avg_cases = total_cases / total_surgeons if total_surgeons > 0 else 0
-            st.metric("📈 術者当たり平均", f"{avg_cases:.1f}件")
-
-@with_error_handling("術者時系列表示")
-def _render_surgeon_timeseries(expanded_df: pd.DataFrame) -> None:
-    """術者ごと時系列を表示"""
-    st.header("📈 術者別 時系列分析")
-    
-    # 術者選択
-    surgeons = sorted(expanded_df["実施術者"].dropna().unique())
-    
-    if not surgeons:
-        st.warning("📊 分析可能な術者データがありません")
-        return
-    
-    selected_surgeon = st.selectbox(
-        "👨‍⚕️ 分析する術者を選択",
-        surgeons,
-        help="時系列分析を行う術者を選択してください"
-    )
-    
-    # 選択された術者のデータをフィルタ
-    surgeon_df = expanded_df[expanded_df['実施術者'] == selected_surgeon]
-    
-    if surgeon_df.empty:
-        st.warning(f"📊 {selected_surgeon}のデータがありません")
-        return
-    
-    # 術者情報の表示
-    _display_surgeon_info(surgeon_df, selected_surgeon)
-    
-    # 週次実績の表示
-    _display_surgeon_weekly_performance(surgeon_df, selected_surgeon)
-
-def _display_surgeon_info(surgeon_df: pd.DataFrame, selected_surgeon: str) -> None:
-    """術者基本情報を表示"""
-    # 術者の基本統計
-    total_cases = len(surgeon_df[surgeon_df.get('is_gas_20min', False)])
-    departments = surgeon_df['実施診療科'].nunique()
-    date_range = surgeon_df['手術実施日_dt'].agg(['min', 'max']) if '手術実施日_dt' in surgeon_df.columns else None
-    
-    st.subheader(f"👨‍⚕️ {selected_surgeon} - 基本情報")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("📊 総手術件数", f"{total_cases:,}件")
-    
-    with col2:
-        st.metric("🏥 関連診療科数", f"{departments}科")
-    
-    with col3:
-        if date_range is not None and not pd.isna(date_range['min']):
-            st.metric("📅 活動開始", date_range['min'].strftime('%Y/%m'))
-        else:
-            st.metric("📅 活動開始", "データなし")
-    
-    with col4:
-        if date_range is not None and not pd.isna(date_range['max']):
-            st.metric("📅 最新実績", date_range['max'].strftime('%Y/%m'))
-        else:
-            st.metric("📅 最新実績", "データなし")
-
-@with_error_handling("術者週次パフォーマンス表示")
-def _display_surgeon_weekly_performance(surgeon_df: pd.DataFrame, selected_surgeon: str) -> None:
-    """術者の週次パフォーマンスを表示"""
-    st.subheader(f"📈 {selected_surgeon} の週次実績")
-    
-    try:
-        summary = weekly.get_summary(surgeon_df, use_complete_weeks=False)
+            departments = ["全診療科"] + sorted(expanded_df["実施診療科"].dropna().unique())
+            selected_dept = st.selectbox("診療科で絞り込み", departments)
         
-        if summary.empty:
-            st.warning(f"📊 {selected_surgeon}の週次データが生成できませんでした")
+        with col2:
+            top_n = st.slider("表示する術者数（上位）", 5, 50, 15)
+        
+        try:
+            # データフィルタリング
+            target_df = expanded_df
+            if selected_dept != "全診療科":
+                target_df = expanded_df[expanded_df['実施診療科'] == selected_dept]
+            
+            # 術者サマリー計算
+            surgeon_summary = surgeon.get_surgeon_summary(target_df)
+            
+            if not surgeon_summary.empty:
+                # ランキンググラフ
+                fig = generic_plots.plot_surgeon_ranking(surgeon_summary, top_n, selected_dept)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # 統計情報
+                SurgeonPage._render_ranking_statistics(surgeon_summary, selected_dept, top_n)
+                
+                # 詳細データテーブル
+                with st.expander("📋 詳細ランキングデータ"):
+                    st.dataframe(
+                        surgeon_summary.head(top_n), 
+                        use_container_width=True,
+                        hide_index=True
+                    )
+            else:
+                st.info("ランキングデータを計算できませんでした")
+                
+        except Exception as e:
+            st.error(f"ランキング分析エラー: {e}")
+            logger.error(f"術者ランキング分析エラー: {e}")
+    
+    @staticmethod
+    def _render_ranking_statistics(surgeon_summary: pd.DataFrame, selected_dept: str, top_n: int) -> None:
+        """ランキング統計情報を表示"""
+        with st.expander("📊 ランキング統計"):
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.write("**基本統計:**")
+                st.write(f"• 対象術者数: {len(surgeon_summary)}人")
+                st.write(f"• 表示術者数: {min(top_n, len(surgeon_summary))}人")
+                st.write(f"• 対象診療科: {selected_dept}")
+            
+            with col2:
+                st.write("**実績統計:**")
+                total_cases = surgeon_summary['手術件数'].sum()
+                avg_cases = surgeon_summary['手術件数'].mean()
+                st.write(f"• 総手術件数: {total_cases:,}件")
+                st.write(f"• 平均件数/術者: {avg_cases:.1f}件")
+            
+            with col3:
+                st.write("**分布統計:**")
+                max_cases = surgeon_summary['手術件数'].max()
+                min_cases = surgeon_summary['手術件数'].min()
+                st.write(f"• 最多件数: {max_cases}件")
+                st.write(f"• 最少件数: {min_cases}件")
+                
+                if len(surgeon_summary) >= 2:
+                    top_surgeon = surgeon_summary.iloc[0]
+                    st.write(f"• トップ術者: {top_surgeon['実施術者']} ({top_surgeon['手術件数']}件)")
+    
+    @staticmethod
+    @safe_data_operation("個別術者分析")
+    def _render_individual_surgeon_analysis(expanded_df: pd.DataFrame) -> None:
+        """個別術者時系列分析を表示"""
+        st.subheader("📈 術者別時系列分析")
+        
+        # 術者選択
+        surgeons = sorted(expanded_df["実施術者"].dropna().unique())
+        selected_surgeon = st.selectbox(
+            "分析する術者を選択", 
+            surgeons,
+            help="時系列分析を行う術者を選択してください"
+        )
+        
+        if not selected_surgeon:
+            st.info("術者を選択してください")
             return
         
-        with chart_container.create_chart_container():
-            fig = trend_plots.create_weekly_dept_chart(
-                summary, 
-                selected_surgeon, 
-                {}  # 個人目標は通常設定されていないため空辞書
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # 週次データの詳細
-        _display_weekly_details(summary, selected_surgeon)
-        
-    except Exception as e:
-        ErrorHandler.display_error(e, f"{selected_surgeon} 週次実績生成")
-
-def _display_weekly_details(summary: pd.DataFrame, selected_surgeon: str) -> None:
-    """週次データの詳細を表示"""
-    if summary.empty:
-        return
+        try:
+            # 選択された術者のデータを抽出
+            surgeon_df = expanded_df[expanded_df['実施術者'] == selected_surgeon]
+            
+            if surgeon_df.empty:
+                st.warning(f"{selected_surgeon}のデータが見つかりません")
+                return
+            
+            # 術者情報表示
+            SurgeonPage._render_surgeon_info(surgeon_df, selected_surgeon)
+            
+            # 週次実績グラフ
+            SurgeonPage._render_surgeon_weekly_trend(surgeon_df, selected_surgeon)
+            
+            # 術者詳細分析
+            SurgeonPage._render_surgeon_detailed_analysis(surgeon_df, selected_surgeon)
+            
+        except Exception as e:
+            st.error(f"個別術者分析エラー: {e}")
+            logger.error(f"個別術者分析エラー ({selected_surgeon}): {e}")
     
-    with st.expander(f"📋 {selected_surgeon} 週次データ詳細"):
-        # サマリー統計
-        total_weeks = len(summary)
-        total_cases = summary.sum().iloc[0] if len(summary.columns) > 0 else 0
-        avg_per_week = total_cases / total_weeks if total_weeks > 0 else 0
-        max_week = summary.max().iloc[0] if len(summary.columns) > 0 else 0
+    @staticmethod
+    def _render_surgeon_info(surgeon_df: pd.DataFrame, surgeon_name: str) -> None:
+        """術者基本情報を表示"""
+        # 基本統計
+        total_cases = len(surgeon_df[surgeon_df['is_gas_20min']])
+        departments = surgeon_df['実施診療科'].nunique()
+        date_range = (surgeon_df['手術実施日_dt'].max() - surgeon_df['手術実施日_dt'].min()).days
         
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("📊 分析週数", f"{total_weeks}週")
-        
+            st.metric("総手術件数", f"{total_cases}件")
         with col2:
-            st.metric("📈 総手術件数", f"{total_cases:.0f}件")
-        
+            st.metric("関連診療科", f"{departments}科")
         with col3:
-            st.metric("📊 週平均", f"{avg_per_week:.1f}件")
-        
+            st.metric("活動期間", f"{date_range}日")
         with col4:
-            st.metric("🏆 最大週", f"{max_week:.0f}件")
+            if date_range > 0:
+                avg_per_day = total_cases / date_range
+                st.metric("平均件数/日", f"{avg_per_day:.2f}件")
+    
+    @staticmethod
+    @safe_data_operation("術者週次推移")
+    def _render_surgeon_weekly_trend(surgeon_df: pd.DataFrame, surgeon_name: str) -> None:
+        """術者の週次推移を表示"""
+        st.subheader(f"{surgeon_name} の週次実績")
         
-        # 詳細データテーブル
-        st.subheader("📋 週別データ")
-        display_summary = summary.copy()
-        display_summary.index = display_summary.index.strftime('%Y-%m-%d')
+        try:
+            summary = weekly.get_summary(surgeon_df, use_complete_weeks=False)
+            
+            if not summary.empty:
+                # 目標辞書は空（術者個人の目標は設定なし）
+                fig = trend_plots.create_weekly_dept_chart(summary, surgeon_name, {})
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # 統計サマリー
+                with st.expander("📊 週次統計"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**活動統計:**")
+                        st.write(f"• 活動週数: {len(summary)}週")
+                        st.write(f"• 最多週: {summary['週合計件数'].max():.0f}件")
+                        st.write(f"• 最少週: {summary['週合計件数'].min():.0f}件")
+                        st.write(f"• 平均/週: {summary['週合計件数'].mean():.1f}件")
+                    
+                    with col2:
+                        st.write("**傾向分析:**")
+                        if len(summary) >= 4:
+                            recent_avg = summary.tail(4)['週合計件数'].mean()
+                            earlier_avg = summary.head(4)['週合計件数'].mean()
+                            
+                            if recent_avg > earlier_avg:
+                                trend = "増加傾向"
+                                trend_color = "🔼"
+                            else:
+                                trend = "減少傾向"
+                                trend_color = "🔽"
+                            
+                            change_rate = ((recent_avg / earlier_avg) - 1) * 100
+                            st.write(f"• 傾向: {trend_color} {trend}")
+                            st.write(f"• 変化率: {change_rate:+.1f}%")
+                        else:
+                            st.write("• 傾向分析には4週以上のデータが必要です")
+            else:
+                st.info(f"{surgeon_name}の週次データがありません")
+                
+        except Exception as e:
+            st.error(f"週次推移分析エラー: {e}")
+            logger.error(f"術者週次推移エラー ({surgeon_name}): {e}")
+    
+    @staticmethod
+    def _render_surgeon_detailed_analysis(surgeon_df: pd.DataFrame, surgeon_name: str) -> None:
+        """術者詳細分析を表示"""
+        st.subheader("📋 詳細分析")
         
-        st.dataframe(
-            display_summary,
-            use_container_width=True
-        )
+        tab1, tab2, tab3 = st.tabs(["診療科別分布", "時間分析", "月次推移"])
+        
+        with tab1:
+            SurgeonPage._render_department_distribution(surgeon_df, surgeon_name)
+        
+        with tab2:
+            SurgeonPage._render_time_distribution(surgeon_df, surgeon_name)
+        
+        with tab3:
+            SurgeonPage._render_monthly_trend(surgeon_df, surgeon_name)
+    
+    @staticmethod
+    def _render_department_distribution(surgeon_df: pd.DataFrame, surgeon_name: str) -> None:
+        """診療科別分布を表示"""
+        try:
+            gas_df = surgeon_df[surgeon_df['is_gas_20min']]
+            
+            if not gas_df.empty:
+                dept_dist = gas_df['実施診療科'].value_counts()
+                
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.bar_chart(dept_dist)
+                
+                with col2:
+                    st.write("**診療科別件数:**")
+                    for dept, count in dept_dist.items():
+                        percentage = (count / len(gas_df)) * 100
+                        st.write(f"• {dept}: {count}件 ({percentage:.1f}%)")
+            else:
+                st.info("診療科別分布データがありません")
+                
+        except Exception as e:
+            st.error(f"診療科別分布分析エラー: {e}")
+    
+    @staticmethod
+    def _render_time_distribution(surgeon_df: pd.DataFrame, surgeon_name: str) -> None:
+        """時間分析を表示"""
+        try:
+            gas_df = surgeon_df[surgeon_df['is_gas_20min']]
+            
+            if not gas_df.empty:
+                # 曜日別分布
+                weekday_dist = gas_df['手術実施日_dt'].dt.day_name().value_counts()
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**曜日別分布:**")
+                    st.bar_chart(weekday_dist)
+                
+                with col2:
+                    st.write("**時間統計:**")
+                    
+                    # 平日・休日分布
+                    if 'is_weekday' in gas_df.columns:
+                        weekday_count = len(gas_df[gas_df['is_weekday']])
+                        weekend_count = len(gas_df[~gas_df['is_weekday']])
+                        
+                        st.metric("平日手術", f"{weekday_count}件")
+                        st.metric("休日手術", f"{weekend_count}件")
+                        
+                        if weekday_count > 0:
+                            weekend_ratio = (weekend_count / (weekday_count + weekend_count)) * 100
+                            st.metric("休日比率", f"{weekend_ratio:.1f}%")
+            else:
+                st.info("時間分析データがありません")
+                
+        except Exception as e:
+            st.error(f"時間分析エラー: {e}")
+    
+    @staticmethod
+    def _render_monthly_trend(surgeon_df: pd.DataFrame, surgeon_name: str) -> None:
+        """月次推移を表示"""
+        try:
+            gas_df = surgeon_df[surgeon_df['is_gas_20min']]
+            
+            if not gas_df.empty:
+                # 月次集計
+                gas_df = gas_df.copy()
+                gas_df['月'] = gas_df['手術実施日_dt'].dt.to_period('M')
+                monthly_counts = gas_df.groupby('月').size()
+                
+                if len(monthly_counts) > 1:
+                    st.line_chart(monthly_counts)
+                    
+                    # 月次統計
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**月次統計:**")
+                        st.write(f"• 活動月数: {len(monthly_counts)}ヶ月")
+                        st.write(f"• 最多月: {monthly_counts.max()}件")
+                        st.write(f"• 最少月: {monthly_counts.min()}件")
+                        st.write(f"• 平均/月: {monthly_counts.mean():.1f}件")
+                    
+                    with col2:
+                        st.write("**月別実績:**")
+                        for month, count in monthly_counts.tail(6).items():
+                            st.write(f"• {month}: {count}件")
+                else:
+                    st.info("月次推移には複数月のデータが必要です")
+            else:
+                st.info("月次推移データがありません")
+                
+        except Exception as e:
+            st.error(f"月次推移分析エラー: {e}")
+
+
+# ページルーター用の関数
+def render():
+    """ページルーター用のレンダー関数"""
+    SurgeonPage.render()

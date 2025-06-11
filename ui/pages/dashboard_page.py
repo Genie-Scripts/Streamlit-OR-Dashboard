@@ -141,16 +141,6 @@ class DashboardPage:
         """週次トレンドセクションを描画"""
         st.header("📈 病院全体 週次トレンド")
         
-        # 🔍 強制デバッグ表示
-        st.error("🔍 デバッグ情報（強制表示）")
-        st.write("**target_dict:**", target_dict)
-        st.write("**target_dict type:**", type(target_dict))
-        st.write("**target_dict length:**", len(target_dict) if target_dict else "None")
-        
-        # SessionManagerから直接取得
-        session_target = SessionManager.get_target_dict()
-        st.write("**SessionManager target_dict:**", session_target)
-        
         # 完全週データオプション
         use_complete_weeks = st.toggle(
             "完全週データで分析", 
@@ -168,12 +158,6 @@ class DashboardPage:
                     summary, "病院全体 週次推移", target_dict
                 )
                 
-                # 一時的に直接表示
-                # ChartContainer.render_chart(
-                #     fig, 
-                #     title="週次推移チャート",
-                #     help_text="病院全体の週次手術件数の推移を表示しています"
-                # )
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.warning("週次トレンドデータがありません")

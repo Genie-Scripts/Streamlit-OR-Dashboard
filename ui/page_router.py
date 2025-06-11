@@ -27,20 +27,21 @@ class PageRouter:
             # 遅延インポートでページモジュールを読み込み
             from ui.pages.dashboard_page import DashboardPage
             from ui.pages.data_management_page import DataManagementPage
+            from ui.pages.hospital_page import HospitalPage
+            from ui.pages.department_page import DepartmentPage
+            from ui.pages.surgeon_page import SurgeonPage
+            from ui.pages.prediction_page import PredictionPage
             
-            # 利用可能なページを設定
+            # 全ページを設定
             self._pages = {
                 "ダッシュボード": DashboardPage.render,
-                "データアップロード": self._render_upload_page_legacy,  # 一時的に元の関数使用
+                "データアップロード": self._render_upload_page_legacy,  # legacy版を継続使用
                 "データ管理": DataManagementPage.render,
+                "病院全体分析": HospitalPage.render,
+                "診療科別分析": DepartmentPage.render,
+                "術者分析": SurgeonPage.render,
+                "将来予測": PredictionPage.render,
             }
-            
-            # 他のページは一時的にフォールバック
-            fallback_pages = [
-                "病院全体分析", "診療科別分析", "術者分析", "将来予測"
-            ]
-            for page in fallback_pages:
-                self._pages[page] = self._render_fallback_page
             
             logger.info(f"ページルート設定完了: {list(self._pages.keys())}")
             
@@ -54,8 +55,12 @@ class PageRouter:
         """フォールバック用の基本ルート設定"""
         self._pages = {
             "ダッシュボード": self._render_fallback_page,
-            "データアップロード": self._render_fallback_page,
+            "データアップロード": self._render_upload_page_legacy,
             "データ管理": self._render_fallback_page,
+            "病院全体分析": self._render_fallback_page,
+            "診療科別分析": self._render_fallback_page,
+            "術者分析": self._render_fallback_page,
+            "将来予測": self._render_fallback_page,
         }
     
     @safe_streamlit_operation("ページ描画")

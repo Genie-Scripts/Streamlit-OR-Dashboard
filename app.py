@@ -40,5 +40,5 @@ def main():
     except Exception as e:
         ErrorHandler.handle_error(e, "メインアプリケーション", show_details=True)
 
-if __name__ == "__main__":  # ← ここを修正
+if __name__ == "__main__":
     main()

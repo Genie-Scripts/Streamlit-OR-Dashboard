@@ -163,10 +163,11 @@ if __name__ == "__main__":
     print(f"週次目標: {get_hospital_weekly_target()}件/週")
     print(f"検証結果: {validate_targets()}")
     
-    # 達成率テスト
-    test_actual = 19.1
-    achievement = HospitalTargets.calculate_achievement_rate(test_actual)
-    print(f"達成率テスト: 実績{test_actual} → 達成率{achievement:.1f}%")
+    # 達成率計算テスト（汎用的な例）
+    test_cases = [15.0, 21.0, 25.0]  # 様々な実績値でテスト
+    for actual in test_cases:
+        achievement = HospitalTargets.calculate_achievement_rate(actual)
+        print(f"達成率テスト: 実績{actual} → 達成率{achievement:.1f}%")
 else:
     # 通常の初期化時に検証実行
     validate_targets()
