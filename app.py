@@ -1,4 +1,4 @@
-# app.py (新版) - リファクタリング後のメインエントリーポイント
+# app.py (改善版) - より簡潔なインポート
 """
 手術分析ダッシュボード - メインアプリケーション
 リファクタリング版: UI層を完全分離した保守性の高いアーキテクチャ
@@ -6,10 +6,8 @@
 
 import streamlit as st
 from config import style_config
-from ui.session_manager import SessionManager
-from ui.sidebar import SidebarManager
-from ui.page_router import render_current_page
-from ui.error_handler import ErrorHandler, setup_global_exception_handler
+from ui import SessionManager, SidebarManager, render_current_page, ErrorHandler
+from ui.error_handler import setup_global_exception_handler
 
 # ページ設定 (必ず最初に実行)
 st.set_page_config(
