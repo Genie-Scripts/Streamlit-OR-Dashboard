@@ -13,6 +13,7 @@ import logging
 from datetime import datetime
 import base64
 from io import BytesIO
+import os
 
 # PDF生成ライブラリ
 try:
@@ -22,6 +23,68 @@ try:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch, cm
     from reportlab.pdfgen import canvas
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.pdfbase import pdfutils
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfbase import pdfmetrics
+    import os
+    
+    # 日本語フォント設定（fontsフォルダーのNotoSansJPを使用）
+    try:
+        # プロジェクトルートのfontsフォルダーから読み込み
+        font_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'fonts')
+        
+        # 利用可能なNotoSansJPフォントファイル
+        font_files = {
+            'NotoSansJP-Regular': 'NotoSansJP-Regular.ttf',
+            'NotoSansJP-Bold': 'NotoSansJP-Bold.ttf',
+            'NotoSansJP-Light': 'NotoSansJP-Light.ttf',
+            'NotoSansJP-Medium': 'NotoSansJP-Medium.ttf'
+        }
+        
+        # フォント登録
+        registered_fonts = {}
+        for font_name, font_file in font_files.items():
+            font_path = os.path.join(font_dir, font_file)
+            if os.path.exists(font_path):
+                try:
+                    pdfmetrics.registerFont(TTFont(font_name, font_path))
+                    registered_fonts[font_name] = font_path
+                    logger.info(f"日本語フォント登録成功: {font_name}")
+                except Exception as e:
+                    logger.warning(f"フォント登録失敗 {font_name}: {e}")
+        
+        # 登録されたフォントから使用フォントを決定
+        if 'NotoSansJP-Regular' in registered_fonts:
+            JAPANESE_FONT = 'NotoSansJP-Regular'
+            JAPANESE_FONT_BOLD = 'NotoSansJP-Bold' if 'NotoSansJP-Bold' in registered_fonts else 'NotoSansJP-Regular'
+            JAPANESE_FONT_LIGHT = 'NotoSansJP-Light' if 'NotoSansJP-Light' in registered_fonts else 'NotoSansJP-Regular'
+            logger.info(f"NotoSansJPフォント使用: {len(registered_fonts)}個のフォントを登録")
+        else:
+            # フォールバック: reportlab内蔵のCIDフォント
+            from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+            pdfmetrics.registerFont(UnicodeCIDFont('HeiseiMin-W3'))
+            pdfmetrics.registerFont(UnicodeCIDFont('HeiseiKakuGo-W5'))
+            JAPANESE_FONT = 'HeiseiMin-W3'
+            JAPANESE_FONT_BOLD = 'HeiseiKakuGo-W5'
+            JAPANESE_FONT_LIGHT = 'HeiseiMin-W3'
+            logger.warning("NotoSansJPが見つからないため、内蔵フォントを使用")
+            
+    except Exception as e:
+        # 最終フォールバック
+        logger.error(f"日本語フォント設定エラー: {e}")
+        JAPANESE_FONT = 'Helvetica'
+        JAPANESE_FONT_BOLD = 'Helvetica-Bold'
+        JAPANESE_FONT_LIGHT = 'Helvetica'
+        logger.warning("日本語フォントを設定できませんでした。英数字のみ表示されます。")
+    
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+    # フォールバック変数
+    JAPANESE_FONT = 'Helvetica'
+    JAPANESE_FONT_BOLD = 'Helvetica-Bold'
+    JAPANESE_FONT_LIGHT = 'Helvetica'lab.pdfgen import canvas
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     REPORTLAB_AVAILABLE = True
 except ImportError:
@@ -44,10 +107,11 @@ class PDFReportGenerator:
         
         self.styles = getSampleStyleSheet()
         
-        # カスタムスタイル
+        # カスタムスタイル（日本語フォント対応）
         self.styles.add(ParagraphStyle(
             name='CustomTitle',
             parent=self.styles['Heading1'],
+            fontName=JAPANESE_FONT_BOLD,
             fontSize=18,
             spaceAfter=20,
             textColor=colors.darkblue,
@@ -57,6 +121,7 @@ class PDFReportGenerator:
         self.styles.add(ParagraphStyle(
             name='CustomHeading',
             parent=self.styles['Heading2'],
+            fontName=JAPANESE_FONT_BOLD,
             fontSize=14,
             spaceBefore=15,
             spaceAfter=10,
@@ -66,8 +131,27 @@ class PDFReportGenerator:
         self.styles.add(ParagraphStyle(
             name='CustomNormal',
             parent=self.styles['Normal'],
+            fontName=JAPANESE_FONT,
             fontSize=10,
             spaceAfter=6
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='CustomSmall',
+            parent=self.styles['Normal'],
+            fontName=JAPANESE_FONT,
+            fontSize=8,
+            spaceAfter=4
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='CustomSubHeading',
+            parent=self.styles['Heading3'],
+            fontName=JAPANESE_FONT_BOLD,
+            fontSize=12,
+            spaceBefore=10,
+            spaceAfter=6,
+            textColor=colors.darkblue
         ))
     
     def generate_dashboard_report(self, 
@@ -108,11 +192,33 @@ class PDFReportGenerator:
         # フッター情報
         story.extend(self._create_footer_section())
         
+        # フォント情報（デバッグ用）
+        story.extend(self._create_font_info_section())
+        
         # PDF生成
         doc.build(story)
         buffer.seek(0)
         
         return buffer
+    
+    def _create_font_info_section(self) -> List:
+        """フォント情報セクション（デバッグ用）"""
+        story = []
+        
+        try:
+            font_info_text = f"""
+            <b>使用フォント情報:</b><br/>
+            • 通常フォント: {JAPANESE_FONT}<br/>
+            • 太字フォント: {JAPANESE_FONT_BOLD}<br/>
+            • 軽量フォント: {JAPANESE_FONT_LIGHT if 'JAPANESE_FONT_LIGHT' in globals() else 'N/A'}<br/>
+            """
+            
+            font_info_para = Paragraph(font_info_text, self.styles['CustomSmall'])
+            story.append(font_info_para)
+        except Exception as e:
+            logger.error(f"フォント情報作成エラー: {e}")
+        
+        return story
     
     def _create_title_page(self, period_info: Dict[str, Any]) -> List:
         """タイトルページを作成"""
@@ -221,8 +327,10 @@ class PDFReportGenerator:
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), JAPANESE_FONT_BOLD),  # ヘッダーは太字
+            ('FONTNAME', (0, 1), (-1, -1), JAPANESE_FONT),      # データ部分は通常
             ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
             ('GRID', (0, 0), (-1, -1), 1, colors.black)
@@ -272,12 +380,13 @@ class PDFReportGenerator:
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), JAPANESE_FONT_BOLD),  # ヘッダーは太字
+            ('FONTNAME', (0, 1), (-1, -1), JAPANESE_FONT),      # データ部分は通常
             ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
             ('BACKGROUND', (0, 1), (-1, -1), colors.lightblue),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('FONTSIZE', (0, 1), (-1, -1), 9)
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
         ]))
         
         story.append(perf_table)
@@ -369,6 +478,17 @@ class StreamlitPDFExporter:
             st.code("pip install reportlab")
             return
         
+        # フォント情報の表示
+        try:
+            if 'JAPANESE_FONT' in globals():
+                if JAPANESE_FONT.startswith('NotoSansJP'):
+                    st.success(f"✅ 日本語フォント: {JAPANESE_FONT} が使用されます")
+                else:
+                    st.warning(f"⚠️ フォールバックフォント: {JAPANESE_FONT} が使用されます")
+                    st.info("💡 最適な表示にはfonts/フォルダーにNotoSansJP-Regular.ttfを配置してください")
+        except:
+            pass
+        
         try:
             # PDF生成
             generator = PDFReportGenerator()
@@ -410,3 +530,102 @@ class StreamlitPDFExporter:
             'total_days': total_days,
             'weekdays': weekdays
         }
+    
+    @staticmethod
+    def check_font_availability() -> Dict[str, Any]:
+        """フォントの利用可能性をチェック"""
+        result = {
+            'fonts_folder_exists': False,
+            'available_fonts': [],
+            'missing_fonts': [],
+            'status': 'error'
+        }
+        
+        try:
+            # fontsフォルダーの存在確認
+            font_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'fonts')
+            result['fonts_folder_exists'] = os.path.exists(font_dir)
+            
+            if not result['fonts_folder_exists']:
+                result['status'] = 'no_fonts_folder'
+                return result
+            
+            # 推奨フォントファイルの確認
+            recommended_fonts = [
+                'NotoSansJP-Regular.ttf',
+                'NotoSansJP-Bold.ttf',
+                'NotoSansJP-Light.ttf',
+                'NotoSansJP-Medium.ttf'
+            ]
+            
+            for font_file in recommended_fonts:
+                font_path = os.path.join(font_dir, font_file)
+                if os.path.exists(font_path):
+                    result['available_fonts'].append(font_file)
+                else:
+                    result['missing_fonts'].append(font_file)
+            
+            # ステータス判定
+            if 'NotoSansJP-Regular.ttf' in result['available_fonts']:
+                result['status'] = 'excellent' if len(result['available_fonts']) >= 3 else 'good'
+            elif len(result['available_fonts']) > 0:
+                result['status'] = 'partial'
+            else:
+                result['status'] = 'no_fonts'
+                
+        except Exception as e:
+            result['error'] = str(e)
+            result['status'] = 'error'
+        
+        return result
+    
+    @staticmethod  
+    def display_font_status():
+        """Streamlit上でフォント状況を表示"""
+        font_status = StreamlitPDFExporter.check_font_availability()
+        
+        if font_status['status'] == 'excellent':
+            st.success("✅ **フォント設定**: 完璧です！全ての推奨フォントが利用可能")
+            st.write(f"利用可能: {', '.join(font_status['available_fonts'])}")
+            
+        elif font_status['status'] == 'good':
+            st.success("✅ **フォント設定**: 良好です")
+            st.write(f"利用可能: {', '.join(font_status['available_fonts'])}")
+            if font_status['missing_fonts']:
+                st.info(f"オプション: {', '.join(font_status['missing_fonts'])}")
+                
+        elif font_status['status'] == 'partial':
+            st.warning("⚠️ **フォント設定**: 一部のフォントが不足")
+            st.write(f"利用可能: {', '.join(font_status['available_fonts'])}")
+            st.write(f"不足: {', '.join(font_status['missing_fonts'])}")
+            st.info("NotoSansJP-Regular.ttf が推奨されます")
+            
+        elif font_status['status'] == 'no_fonts_folder':
+            st.error("❌ **フォント設定**: fonts/フォルダーが見つかりません")
+            st.info("プロジェクトルートに fonts/ フォルダーを作成してください")
+            
+        elif font_status['status'] == 'no_fonts':
+            st.error("❌ **フォント設定**: NotoSansJPフォントが見つかりません")
+            st.info("fonts/フォルダーにNotoSansJP-Regular.ttfを配置してください")
+            
+        else:
+            st.error("❌ **フォント設定**: チェック中にエラーが発生")
+            if 'error' in font_status:
+                st.write(f"エラー: {font_status['error']}")
+        
+        # ダウンロードリンク
+        with st.expander("📥 NotoSansJPフォントのダウンロード"):
+            st.markdown("""
+            **Google Fonts から取得:**
+            1. [Google Fonts - Noto Sans Japanese](https://fonts.google.com/noto/specimen/Noto+Sans+JP)
+            2. 「Download family」をクリック
+            3. ZIPファイルを展開して .ttf ファイルを fonts/ フォルダーに配置
+            
+            **必須ファイル:**
+            - NotoSansJP-Regular.ttf（通常フォント）
+            
+            **推奨ファイル:**
+            - NotoSansJP-Bold.ttf（太字フォント）
+            """)
+        
+        return font_status

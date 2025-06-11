@@ -663,6 +663,10 @@ class DashboardPage:
             - 手術室稼働率詳細
             - 週次推移グラフ
             """)
+            
+            # フォント状況確認
+            if st.button("🔧 フォント設定確認", help="PDF表示品質の確認"):
+                StreamlitPDFExporter.display_font_status()
         
         with col2:
             if start_date and end_date:
