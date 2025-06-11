@@ -2,6 +2,7 @@
 import plotly.graph_objects as go
 import numpy as np
 from config import style_config as sc
+from config.hospital_targets import HospitalTargets
 
 def _add_common_traces(fig, summary_df, y_col, target_value, target_label):
     """グラフに共通の要素（目標線、平均線など）を追加するヘルパー関数"""
@@ -26,8 +27,9 @@ def create_weekly_summary_chart(summary_df, title, target_dict):
     y_col = '平日1日平均件数'
     fig.add_trace(go.Scatter(x=summary_df['週'], y=summary_df[y_col], mode='lines+markers', name='平日1日平均', line=dict(color=sc.PRIMARY_COLOR), marker=sc.PRIMARY_MARKER))
     
-    total_target = sum(target_dict.values()) / 5 if target_dict else 21.0 # 1日あたりに換算
-    _add_common_traces(fig, summary_df, y_col, total_target, "件/日")
+    # 🔧 修正：病院全体目標を設定ファイルから取得
+    hospital_daily_target = HospitalTargets.get_daily_target('weekday_gas_surgeries')
+    _add_common_traces(fig, summary_df, y_col, hospital_daily_target, "件/日")
 
     fig.update_layout(title=title, xaxis_title="週 (月曜始まり)", yaxis_title="平日1日平均件数", **sc.LAYOUT_DEFAULTS)
     return fig
@@ -41,6 +43,7 @@ def create_weekly_dept_chart(summary_df, dept_name, target_dict):
     y_col = '週合計件数'
     fig.add_trace(go.Scatter(x=summary_df['週'], y=summary_df[y_col], mode='lines+markers', name='週合計', line=dict(color=sc.PRIMARY_COLOR), marker=sc.PRIMARY_MARKER))
     
+    # 診療科別は元のまま（target_dictから取得）
     target_value = target_dict.get(dept_name)
     _add_common_traces(fig, summary_df, y_col, target_value, "件/週")
     
@@ -56,8 +59,9 @@ def create_monthly_summary_chart(summary_df, title, target_dict):
     y_col = '平日1日平均件数'
     fig.add_trace(go.Scatter(x=summary_df['月'], y=summary_df[y_col], mode='lines+markers', name='平日1日平均', line=dict(color=sc.PRIMARY_COLOR), marker=sc.PRIMARY_MARKER))
 
-    total_target = sum(target_dict.values()) / 5 if target_dict else 21.0
-    _add_common_traces(fig, summary_df, y_col, total_target, "件/日")
+    # 🔧 修正：病院全体目標を設定ファイルから取得
+    hospital_daily_target = HospitalTargets.get_daily_target('weekday_gas_surgeries')
+    _add_common_traces(fig, summary_df, y_col, hospital_daily_target, "件/日")
     
     fig.update_layout(title=title, xaxis_title="月", yaxis_title="平日1日平均件数", **sc.LAYOUT_DEFAULTS)
     return fig
@@ -71,8 +75,9 @@ def create_quarterly_summary_chart(summary_df, title, target_dict):
     y_col = '平日1日平均件数'
     fig.add_trace(go.Bar(x=summary_df['四半期ラベル'], y=summary_df[y_col], name='平日1日平均', marker_color=sc.PRIMARY_COLOR, opacity=0.8))
     
-    total_target = sum(target_dict.values()) / 5 if target_dict else 21.0
-    _add_common_traces(fig, summary_df, y_col, total_target, "件/日")
+    # 🔧 修正：病院全体目標を設定ファイルから取得
+    hospital_daily_target = HospitalTargets.get_daily_target('weekday_gas_surgeries')
+    _add_common_traces(fig, summary_df, y_col, hospital_daily_target, "件/日")
     
     fig.update_layout(title=title, xaxis_title="四半期", yaxis_title="平日1日平均件数", **sc.LAYOUT_DEFAULTS)
     return fig
