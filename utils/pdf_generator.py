@@ -108,7 +108,7 @@ class PDFReportGenerator:
         
         self.styles = getSampleStyleSheet()
         
-        # カスタムスタイル（日本語フォント対応）
+        # カスタムスタイル（日本語フォント対応 + エンコーディング対応）
         self.styles.add(ParagraphStyle(
             name='CustomTitle',
             parent=self.styles['Heading1'],
@@ -116,7 +116,8 @@ class PDFReportGenerator:
             fontSize=18,
             spaceAfter=20,
             textColor=colors.darkblue,
-            alignment=TA_CENTER
+            alignment=TA_CENTER,
+            wordWrap='CJK'  # 日本語の改行処理
         ))
         
         self.styles.add(ParagraphStyle(
@@ -126,7 +127,8 @@ class PDFReportGenerator:
             fontSize=14,
             spaceBefore=15,
             spaceAfter=10,
-            textColor=colors.darkblue
+            textColor=colors.darkblue,
+            wordWrap='CJK'
         ))
         
         self.styles.add(ParagraphStyle(
@@ -134,7 +136,8 @@ class PDFReportGenerator:
             parent=self.styles['Normal'],
             fontName=JAPANESE_FONT,
             fontSize=10,
-            spaceAfter=6
+            spaceAfter=6,
+            wordWrap='CJK'
         ))
         
         self.styles.add(ParagraphStyle(
@@ -142,7 +145,8 @@ class PDFReportGenerator:
             parent=self.styles['Normal'],
             fontName=JAPANESE_FONT,
             fontSize=8,
-            spaceAfter=4
+            spaceAfter=4,
+            wordWrap='CJK'
         ))
         
         self.styles.add(ParagraphStyle(
@@ -152,7 +156,8 @@ class PDFReportGenerator:
             fontSize=12,
             spaceBefore=10,
             spaceAfter=6,
-            textColor=colors.darkblue
+            textColor=colors.darkblue,
+            wordWrap='CJK'
         ))
     
     def generate_dashboard_report(self, 
@@ -166,25 +171,49 @@ class PDFReportGenerator:
             st.error("PDF生成にはreportlabライブラリが必要です")
             return None
         
+        # 文字列のサニタイズ処理
+        def sanitize_text(text):
+            """絵文字や特殊文字を除去"""
+            if not isinstance(text, str):
+                text = str(text)
+            # 絵文字や特殊Unicode文字を除去
+            import re
+            # 基本的な日本語・英数字・記号のみ許可
+            sanitized = re.sub(r'[^\u0020-\u007E\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\u3000\u3001-\u303F\uFF01-\uFF5E]', '', text)
+            return sanitized
+        
+        # period_infoの文字列をサニタイズ
+        sanitized_period_info = {}
+        for key, value in period_info.items():
+            sanitized_period_info[key] = sanitize_text(value) if isinstance(value, str) else value
+        
+        # performance_dataの文字列をサニタイズ
+        if not performance_data.empty:
+            performance_data_clean = performance_data.copy()
+            for col in performance_data_clean.select_dtypes(include=['object']).columns:
+                performance_data_clean[col] = performance_data_clean[col].apply(lambda x: sanitize_text(x) if isinstance(x, str) else x)
+        else:
+            performance_data_clean = performance_data
+        
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4)
         story = []
         
         # タイトルページ
-        story.extend(self._create_title_page(period_info))
+        story.extend(self._create_title_page(sanitized_period_info))
         
         # ページブレイク
         story.append(PageBreak())
         
         # 概要セクション
-        story.extend(self._create_summary_section(kpi_data, period_info))
+        story.extend(self._create_summary_section(kpi_data, sanitized_period_info))
         
         # KPI セクション
         story.extend(self._create_kpi_section(kpi_data))
         
         # パフォーマンスセクション
-        if not performance_data.empty:
-            story.extend(self._create_performance_section(performance_data))
+        if not performance_data_clean.empty:
+            story.extend(self._create_performance_section(performance_data_clean))
         
         # グラフセクション
         if charts:
@@ -209,9 +238,9 @@ class PDFReportGenerator:
         try:
             font_info_text = f"""
             <b>使用フォント情報:</b><br/>
-            • 通常フォント: {JAPANESE_FONT}<br/>
-            • 太字フォント: {JAPANESE_FONT_BOLD}<br/>
-            • 軽量フォント: {JAPANESE_FONT_LIGHT}<br/>
+            ・ 通常フォント: {JAPANESE_FONT}<br/>
+            ・ 太字フォント: {JAPANESE_FONT_BOLD}<br/>
+            ・ 軽量フォント: {JAPANESE_FONT_LIGHT}<br/>
             """
             
             font_info_para = Paragraph(font_info_text, self.styles['CustomSmall'])
@@ -225,8 +254,8 @@ class PDFReportGenerator:
         """タイトルページを作成"""
         story = []
         
-        # メインタイトル
-        title = Paragraph("🏥 手術分析ダッシュボード", self.styles['CustomTitle'])
+        # メインタイトル（絵文字を除去）
+        title = Paragraph("手術分析ダッシュボード", self.styles['CustomTitle'])
         story.append(title)
         story.append(Spacer(1, 0.5*inch))
         
@@ -259,8 +288,8 @@ class PDFReportGenerator:
         """概要セクションを作成"""
         story = []
         
-        # セクションタイトル
-        story.append(Paragraph("📊 エグゼクティブサマリー", self.styles['CustomHeading']))
+        # セクションタイトル（絵文字を除去）
+        story.append(Paragraph("エグゼクティブサマリー", self.styles['CustomHeading']))
         
         # 主要指標サマリー
         gas_cases = kpi_data.get('gas_cases', 0)
@@ -271,10 +300,10 @@ class PDFReportGenerator:
         summary_text = f"""
         選択期間（{period_info.get('period_name', 'N/A')}）における手術実績の概要：<br/><br/>
         
-        • <b>全身麻酔手術件数:</b> {gas_cases:,}件<br/>
-        • <b>全手術件数:</b> {total_cases:,}件<br/>
-        • <b>平日1日あたり全身麻酔手術:</b> {daily_avg:.1f}件/日<br/>
-        • <b>手術室稼働率:</b> {utilization:.1f}%<br/><br/>
+        ・ <b>全身麻酔手術件数:</b> {gas_cases:,}件<br/>
+        ・ <b>全手術件数:</b> {total_cases:,}件<br/>
+        ・ <b>平日1日あたり全身麻酔手術:</b> {daily_avg:.1f}件/日<br/>
+        ・ <b>手術室稼働率:</b> {utilization:.1f}%<br/><br/>
         
         手術室稼働率は OP-1〜OP-12（OP-11A, OP-11B除く）11室の平日9:00〜17:15における
         実際の稼働時間を基準として算出されています。
@@ -290,8 +319,8 @@ class PDFReportGenerator:
         """KPI セクションを作成"""
         story = []
         
-        # セクションタイトル
-        story.append(Paragraph("📈 主要業績指標 (KPI)", self.styles['CustomHeading']))
+        # セクションタイトル（絵文字を除去）
+        story.append(Paragraph("主要業績指標 (KPI)", self.styles['CustomHeading']))
         
         # KPI テーブルデータ
         kpi_table_data = [
@@ -346,9 +375,9 @@ class PDFReportGenerator:
         
         detail_text = f"""
         <b>手術室稼働詳細:</b><br/>
-        • 実際稼働時間: {actual_minutes:,}分 ({actual_minutes/60:.1f}時間)<br/>
-        • 最大稼働時間: {max_minutes:,}分 ({max_minutes/60:.1f}時間)<br/>
-        • 平日数: {kpi_data.get('weekdays', 0)}日<br/>
+        ・ 実際稼働時間: {actual_minutes:,}分 ({actual_minutes/60:.1f}時間)<br/>
+        ・ 最大稼働時間: {max_minutes:,}分 ({max_minutes/60:.1f}時間)<br/>
+        ・ 平日数: {kpi_data.get('weekdays', 0)}日<br/>
         """
         
         detail_para = Paragraph(detail_text, self.styles['CustomNormal'])
@@ -361,8 +390,8 @@ class PDFReportGenerator:
         """パフォーマンスセクションを作成"""
         story = []
         
-        # セクションタイトル
-        story.append(Paragraph("🏆 診療科別パフォーマンス", self.styles['CustomHeading']))
+        # セクションタイトル（絵文字を除去）
+        story.append(Paragraph("診療科別パフォーマンス", self.styles['CustomHeading']))
         
         # パフォーマンステーブル
         perf_table_data = [['診療科', '期間平均', '直近週実績', '週次目標', '達成率(%)']]
@@ -399,13 +428,13 @@ class PDFReportGenerator:
         
         analysis_text = f"""
         <b>達成率分析:</b><br/>
-        • 目標達成科数: {len(high_performers)}科 / {len(performance_data)}科<br/>
-        • 要注意科数: {len(low_performers)}科 (達成率80%未満)<br/>
+        ・ 目標達成科数: {len(high_performers)}科 / {len(performance_data)}科<br/>
+        ・ 要注意科数: {len(low_performers)}科 (達成率80%未満)<br/>
         """
         
         if len(high_performers) > 0:
             top_dept = high_performers.iloc[0]
-            analysis_text += f"• 最高達成率: {top_dept['診療科']} ({top_dept['達成率(%)']:.1f}%)<br/>"
+            analysis_text += f"・ 最高達成率: {top_dept['診療科']} ({top_dept['達成率(%)']:.1f}%)<br/>"
         
         analysis_para = Paragraph(analysis_text, self.styles['CustomNormal'])
         story.append(analysis_para)
@@ -417,8 +446,8 @@ class PDFReportGenerator:
         """グラフセクションを作成"""
         story = []
         
-        # セクションタイトル
-        story.append(Paragraph("📊 グラフ・チャート", self.styles['CustomHeading']))
+        # セクションタイトル（絵文字を除去）
+        story.append(Paragraph("グラフ・チャート", self.styles['CustomHeading']))
         
         for chart_name, fig in charts.items():
             try:
@@ -451,9 +480,9 @@ class PDFReportGenerator:
         
         footer_text = f"""
         <b>レポート生成情報:</b><br/>
-        • システム: 手術分析ダッシュボード v1.0<br/>
-        • 生成日時: {datetime.now().strftime('%Y年%m月%d日 %H時%M分')}<br/>
-        • 注意事項: このレポートに含まれる情報は分析対象期間のデータに基づいています<br/>
+        ・ システム: 手術分析ダッシュボード v1.0<br/>
+        ・ 生成日時: {datetime.now().strftime('%Y年%m月%d日 %H時%M分')}<br/>
+        ・ 注意事項: このレポートに含まれる情報は分析対象期間のデータに基づいています<br/>
         """
         
         footer_para = Paragraph(footer_text, self.styles['CustomNormal'])
