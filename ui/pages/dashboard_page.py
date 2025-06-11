@@ -18,6 +18,13 @@ from analysis import weekly, ranking
 from plotting import trend_plots, generic_plots
 from utils import date_helpers
 
+# PDF出力機能をインポート
+try:
+    from utils.pdf_generator import StreamlitPDFExporter
+    PDF_EXPORT_AVAILABLE = True
+except ImportError:
+    PDF_EXPORT_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,14 +52,33 @@ class DashboardPage:
         # 分析期間情報
         DashboardPage._render_analysis_period_info(latest_date, analysis_period, start_date, end_date)
         
+        # PDFデータ収集用の変数
+        pdf_kpi_data = {}
+        pdf_performance_data = pd.DataFrame()
+        pdf_charts = {}
+        
         # 主要指標セクション
-        DashboardPage._render_kpi_section(df, latest_date, start_date, end_date)
+        pdf_kpi_data = DashboardPage._render_kpi_section_with_data(df, latest_date, start_date, end_date)
         
         # 診療科別パフォーマンスダッシュボード
-        DashboardPage._render_performance_dashboard(df, target_dict, latest_date, start_date, end_date)
+        pdf_performance_data = DashboardPage._render_performance_dashboard_with_data(df, target_dict, latest_date, start_date, end_date)
         
         # 目標達成状況サマリー  
         DashboardPage._render_achievement_summary(df, target_dict, latest_date, start_date, end_date)
+        
+        # 週次推移グラフ（PDF用）
+        if not df.empty:
+            try:
+                summary = weekly.get_summary(df, use_complete_weeks=True)
+                if not summary.empty:
+                    pdf_charts['週次推移'] = trend_plots.create_weekly_summary_chart(summary, "病院全体 週次推移", target_dict)
+            except Exception as e:
+                logger.error(f"週次推移グラフ生成エラー: {e}")
+        
+        # PDF出力セクション
+        DashboardPage._render_pdf_export_section(
+            pdf_kpi_data, pdf_performance_data, analysis_period, start_date, end_date, pdf_charts
+        )
     
     @staticmethod
     def _render_period_selector(latest_date: Optional[pd.Timestamp]) -> Tuple[str, pd.Timestamp, pd.Timestamp]:
@@ -523,7 +549,188 @@ class DashboardPage:
             logger.error(f"手術時間計算エラー: {e}")
             fallback_minutes = len(df) * 60
             logger.info(f"エラー時フォールバック: {fallback_minutes}分")
-            return fallback_minutes
+    @staticmethod
+    @safe_data_operation("KPI計算")
+    def _render_kpi_section_with_data(df: pd.DataFrame, latest_date: Optional[pd.Timestamp], 
+                          start_date: Optional[pd.Timestamp], end_date: Optional[pd.Timestamp]) -> Dict[str, Any]:
+        """KPIセクションを描画し、データも返す"""
+        st.header("📊 主要指標 (選択期間)")
+        
+        try:
+            # 選択された期間でデータをフィルタリング
+            if start_date and end_date:
+                period_df = df[
+                    (df['手術実施日_dt'] >= start_date) & 
+                    (df['手術実施日_dt'] <= end_date)
+                ]
+            else:
+                # フォールバック: 元の関数を使用
+                kpi_summary = ranking.get_kpi_summary(df, latest_date)
+                generic_plots.display_kpi_metrics(kpi_summary)
+                return {}
+            
+            # KPIサマリーを計算（選択期間用）
+            kpi_data = DashboardPage._calculate_period_kpi(period_df, start_date, end_date)
+            
+            # KPI表示（直接メトリクス表示）
+            DashboardPage._display_period_kpi_metrics(kpi_data, start_date, end_date)
+            
+            return kpi_data
+            
+        except Exception as e:
+            logger.error(f"KPI計算エラー: {e}")
+            st.error("KPI計算中にエラーが発生しました")
+            return {}
+    
+    @staticmethod
+    @safe_data_operation("パフォーマンスダッシュボード表示")
+    def _render_performance_dashboard_with_data(df: pd.DataFrame, target_dict: Dict[str, Any], 
+                                    latest_date: Optional[pd.Timestamp],
+                                    start_date: Optional[pd.Timestamp], 
+                                    end_date: Optional[pd.Timestamp]) -> pd.DataFrame:
+        """診療科別パフォーマンスダッシュボードを表示し、データも返す"""
+        st.markdown("---")
+        st.header("📊 診療科別パフォーマンスダッシュボード")
+        
+        if start_date and end_date:
+            st.caption(f"🗓️ 分析対象期間: {start_date.strftime('%Y/%m/%d')} ~ {end_date.strftime('%Y/%m/%d')}")
+        
+        # パフォーマンスサマリーを取得
+        try:
+            # 選択期間でデータをフィルタリング
+            if start_date and end_date:
+                period_df = df[
+                    (df['手術実施日_dt'] >= start_date) & 
+                    (df['手術実施日_dt'] <= end_date)
+                ]
+            else:
+                period_df = df
+            
+            perf_summary = DashboardPage._calculate_period_performance(period_df, target_dict, start_date, end_date)
+            
+            if not perf_summary.empty:
+                if '達成率(%)' not in perf_summary.columns:
+                    st.warning("パフォーマンスデータに達成率の列が見つかりません。")
+                    return pd.DataFrame()
+                
+                # 達成率順にソート
+                sorted_perf = perf_summary.sort_values("達成率(%)", ascending=False)
+                
+                # パフォーマンスカードの表示
+                DashboardPage._render_performance_cards(sorted_perf)
+                
+                # 詳細データテーブル
+                with st.expander("📋 詳細データテーブル"):
+                    st.dataframe(sorted_perf, use_container_width=True)
+                
+                return sorted_perf
+            else:
+                st.info("診療科別パフォーマンスを計算する十分なデータがありません。")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            st.error(f"パフォーマンス計算エラー: {e}")
+            logger.error(f"パフォーマンス計算エラー: {e}")
+            return pd.DataFrame()
+    
+    @staticmethod
+    def _render_pdf_export_section(kpi_data: Dict[str, Any], 
+                                 performance_data: pd.DataFrame,
+                                 period_name: str,
+                                 start_date: Optional[pd.Timestamp],
+                                 end_date: Optional[pd.Timestamp],
+                                 charts: Dict[str, Any] = None) -> None:
+        """PDF出力セクションを表示"""
+        
+        st.markdown("---")
+        st.header("📄 レポート出力")
+        
+        if not PDF_EXPORT_AVAILABLE:
+            st.warning("📋 PDF出力機能を使用するには以下のライブラリのインストールが必要です:")
+            st.code("pip install reportlab")
+            st.info("現在は表示のみの機能です。PDF出力を有効にするには管理者にお問い合わせください。")
+            return
+        
+        # PDF出力の説明
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("""
+            **📊 レポート内容:**
+            - エグゼクティブサマリー
+            - 主要業績指標 (KPI)
+            - 診療科別パフォーマンス
+            - 手術室稼働率詳細
+            - 週次推移グラフ
+            """)
+        
+        with col2:
+            if start_date and end_date:
+                # 期間情報を作成
+                total_days = (end_date - start_date).days + 1
+                weekdays = kpi_data.get('weekdays', 0)
+                
+                period_info = StreamlitPDFExporter.create_period_info(
+                    period_name, start_date, end_date, total_days, weekdays
+                )
+                
+                # PDFダウンロードボタン
+                if st.button("📄 PDFレポート生成", type="primary", use_container_width=True):
+                    with st.spinner("PDFレポートを生成中..."):
+                        try:
+                            StreamlitPDFExporter.add_pdf_download_button(
+                                kpi_data=kpi_data,
+                                performance_data=performance_data,
+                                period_info=period_info,
+                                charts=charts,
+                                button_label="📥 PDFをダウンロード"
+                            )
+                        except Exception as e:
+                            st.error(f"PDF生成でエラーが発生しました: {e}")
+                            logger.error(f"PDF生成エラー: {e}")
+            else:
+                st.error("期間データが不正です。PDF生成できません。")
+        
+        # PDF内容のプレビュー
+        with st.expander("📋 レポート内容プレビュー"):
+            if kpi_data:
+                st.write("**主要指標:**")
+                st.write(f"• 全身麻酔手術件数: {kpi_data.get('gas_cases', 0):,}件")
+                st.write(f"• 全手術件数: {kpi_data.get('total_cases', 0):,}件")
+                st.write(f"• 平日1日あたり: {kpi_data.get('daily_avg_gas', 0):.1f}件/日")
+                st.write(f"• 手術室稼働率: {kpi_data.get('utilization_rate', 0):.1f}%")
+            
+            if not performance_data.empty:
+                st.write(f"**診療科別パフォーマンス:** {len(performance_data)}科のデータ")
+                high_performers = len(performance_data[performance_data['達成率(%)'] >= 100])
+                st.write(f"• 目標達成科数: {high_performers}科")
+                
+            if charts:
+                st.write(f"**グラフ:** {len(charts)}個のグラフを含む")
+        
+        st.info("💡 PDFレポートには現在表示されている期間のデータが含まれます。期間を変更してから生成することで、異なる期間のレポートを作成できます。")
+    
+    @staticmethod
+    def _filter_operating_hours(df: pd.DataFrame) -> pd.DataFrame:
+        """9:00〜17:15の手術をフィルタリング"""
+        # 実データ対応版を呼び出し
+        return DashboardPage._filter_operating_hours_fixed(df)
+    
+    @staticmethod
+    @safe_data_operation("KPI計算")
+    def _render_kpi_section(df: pd.DataFrame, latest_date: Optional[pd.Timestamp], 
+                          start_date: Optional[pd.Timestamp], end_date: Optional[pd.Timestamp]) -> None:
+        """KPIセクションを描画（互換性のため）"""
+        DashboardPage._render_kpi_section_with_data(df, latest_date, start_date, end_date)
+    
+    @staticmethod
+    @safe_data_operation("パフォーマンスダッシュボード表示")  
+    def _render_performance_dashboard(df: pd.DataFrame, target_dict: Dict[str, Any], 
+                                    latest_date: Optional[pd.Timestamp],
+                                    start_date: Optional[pd.Timestamp], 
+                                    end_date: Optional[pd.Timestamp]) -> None:
+        """診療科別パフォーマンスダッシュボードを表示（互換性のため）"""
+        DashboardPage._render_performance_dashboard_with_data(df, target_dict, latest_date, start_date, end_date)
     
     @staticmethod
     def _filter_operating_hours(df: pd.DataFrame) -> pd.DataFrame:
