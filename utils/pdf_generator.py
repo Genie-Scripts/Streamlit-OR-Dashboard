@@ -145,8 +145,22 @@ class PDFReportGenerator:
             parent=self.styles['Normal'],
             fontName=JAPANESE_FONT,
             fontSize=8,
-            spaceAfter=4,
-            wordWrap='CJK'
+            spaceAfter=2,
+            spaceBefore=2,
+            wordWrap='CJK',
+            alignment=TA_CENTER  # テーブル用に中央揃え
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='CustomSmallBold',
+            parent=self.styles['Normal'],
+            fontName=JAPANESE_FONT_BOLD,
+            fontSize=8,
+            spaceAfter=2,
+            spaceBefore=2,
+            wordWrap='CJK',
+            alignment=TA_CENTER,  # テーブル用に中央揃え
+            textColor=colors.whitesmoke  # ヘッダー用の白文字
         ))
         
         self.styles.add(ParagraphStyle(
@@ -316,32 +330,37 @@ class PDFReportGenerator:
         # セクションタイトル（絵文字を除去）
         story.append(Paragraph("主要業績指標 (KPI)", self.styles['CustomHeading']))
         
-        # KPI テーブルデータ（改行を追加して2段表示）
+        # KPI テーブルデータ（Paragraphオブジェクトとして改行を処理）
         kpi_table_data = [
-            ['指標', '値', '単位', '備考'],
             [
-                '全身麻酔手術件数',
-                f"{kpi_data.get('gas_cases', 0):,}",
-                '件',
-                '20分以上の<br/>全身麻酔手術'
+                Paragraph('指標', self.styles['CustomSmallBold']),
+                Paragraph('値', self.styles['CustomSmallBold']),
+                Paragraph('単位', self.styles['CustomSmallBold']),
+                Paragraph('備考', self.styles['CustomSmallBold'])
             ],
             [
-                '全手術件数',
-                f"{kpi_data.get('total_cases', 0):,}",
-                '件',
-                '全ての手術<br/>（局麻等含む）'
+                Paragraph('全身麻酔手術件数', self.styles['CustomSmall']),
+                Paragraph(f"{kpi_data.get('gas_cases', 0):,}", self.styles['CustomSmall']),
+                Paragraph('件', self.styles['CustomSmall']),
+                Paragraph('20分以上の<br/>全身麻酔手術', self.styles['CustomSmall'])
             ],
             [
-                '平日1日あたり<br/>全身麻酔手術',
-                f"{kpi_data.get('daily_avg_gas', 0):.1f}",
-                '件/日',
-                '平日（月〜金）<br/>の平均'
+                Paragraph('全手術件数', self.styles['CustomSmall']),
+                Paragraph(f"{kpi_data.get('total_cases', 0):,}", self.styles['CustomSmall']),
+                Paragraph('件', self.styles['CustomSmall']),
+                Paragraph('全ての手術<br/>(局麻等含む)', self.styles['CustomSmall'])
             ],
             [
-                '手術室稼働率',
-                f"{kpi_data.get('utilization_rate', 0):.1f}",
-                '%',
-                'OP-1〜12の<br/>実稼働時間ベース'
+                Paragraph('平日1日あたり<br/>全身麻酔手術', self.styles['CustomSmall']),
+                Paragraph(f"{kpi_data.get('daily_avg_gas', 0):.1f}", self.styles['CustomSmall']),
+                Paragraph('件/日', self.styles['CustomSmall']),
+                Paragraph('平日(月〜金)<br/>の平均', self.styles['CustomSmall'])
+            ],
+            [
+                Paragraph('手術室稼働率', self.styles['CustomSmall']),
+                Paragraph(f"{kpi_data.get('utilization_rate', 0):.1f}", self.styles['CustomSmall']),
+                Paragraph('%', self.styles['CustomSmall']),
+                Paragraph('OP-1〜12の<br/>実稼働時間ベース', self.styles['CustomSmall'])
             ]
         ]
         
@@ -349,16 +368,11 @@ class PDFReportGenerator:
         kpi_table = Table(kpi_table_data, colWidths=[3.5*cm, 2*cm, 1.5*cm, 3.5*cm])
         kpi_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),  # 縦方向中央揃え
-            ('FONTNAME', (0, 0), (-1, 0), JAPANESE_FONT_BOLD),  # ヘッダーは太字
-            ('FONTNAME', (0, 1), (-1, -1), JAPANESE_FONT),      # データ部分は通常
-            ('FONTSIZE', (0, 0), (-1, 0), 11),
-            ('FONTSIZE', (0, 1), (-1, -1), 9),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('TOPPADDING', (0, 1), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
             ('GRID', (0, 0), (-1, -1), 1, colors.black)
         ]))
@@ -387,11 +401,22 @@ class PDFReportGenerator:
         """パフォーマンスセクションを作成"""
         story = []
         
+        # 改ページを追加
+        story.append(PageBreak())
+        
         # セクションタイトル（絵文字を除去）
         story.append(Paragraph("診療科別パフォーマンス", self.styles['CustomHeading']))
         
-        # パフォーマンステーブル（改行を追加）
-        perf_table_data = [['診療科', '期間<br/>平均', '直近週<br/>実績', '週次<br/>目標', '達成率<br/>(%)']]
+        # パフォーマンステーブル（Paragraphオブジェクトとして改行を処理）
+        perf_table_data = [
+            [
+                Paragraph('診療科', self.styles['CustomSmallBold']),
+                Paragraph('期間<br/>平均', self.styles['CustomSmallBold']),
+                Paragraph('直近週<br/>実績', self.styles['CustomSmallBold']),
+                Paragraph('週次<br/>目標', self.styles['CustomSmallBold']),
+                Paragraph('達成率<br/>(%)', self.styles['CustomSmallBold'])
+            ]
+        ]
         
         for _, row in performance_data.iterrows():
             dept_name = self._sanitize_text_safe(str(row['診療科']))
@@ -406,27 +431,22 @@ class PDFReportGenerator:
                         dept_name = parts[0] + '科<br/>' + '科'.join(parts[1:])
             
             perf_table_data.append([
-                dept_name,
-                f"{row['期間平均']:.1f}",
-                f"{row['直近週実績']:.0f}",
-                f"{row['週次目標']:.1f}",
-                f"{row['達成率(%)']:.1f}"
+                Paragraph(dept_name, self.styles['CustomSmall']),
+                Paragraph(f"{row['期間平均']:.1f}", self.styles['CustomSmall']),
+                Paragraph(f"{row['直近週実績']:.0f}", self.styles['CustomSmall']),
+                Paragraph(f"{row['週次目標']:.1f}", self.styles['CustomSmall']),
+                Paragraph(f"{row['達成率(%)']:.1f}", self.styles['CustomSmall'])
             ])
         
         # テーブル作成（幅を調整）
         perf_table = Table(perf_table_data, colWidths=[3*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.8*cm])
         perf_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),  # 縦方向中央揃え
-            ('FONTNAME', (0, 0), (-1, 0), JAPANESE_FONT_BOLD),  # ヘッダーは太字
-            ('FONTNAME', (0, 1), (-1, -1), JAPANESE_FONT),      # データ部分は通常
-            ('FONTSIZE', (0, 0), (-1, 0), 9),
-            ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-            ('TOPPADDING', (0, 1), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 1), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
             ('BACKGROUND', (0, 1), (-1, -1), colors.lightblue),
             ('GRID', (0, 0), (-1, -1), 1, colors.black)
         ]))
@@ -458,6 +478,9 @@ class PDFReportGenerator:
     def _create_charts_section(self, charts: Dict[str, go.Figure]) -> List:
         """グラフセクションを作成"""
         story = []
+        
+        # 改ページを追加
+        story.append(PageBreak())
         
         # セクションタイトル（絵文字を除去）
         story.append(Paragraph("グラフ・チャート", self.styles['CustomHeading']))
