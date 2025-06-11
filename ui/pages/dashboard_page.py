@@ -137,8 +137,24 @@ class DashboardPage:
     @safe_data_operation("週次トレンド分析")
     def _render_weekly_trend(df: pd.DataFrame, target_dict: Dict[str, Any]) -> None:
         """週次トレンドセクションを描画"""
-        st.header("📈 病院全体 週次トレンド")
         
+        # 🔍 デバッグ: 目標値の詳細表示
+        with st.expander("🔍 目標値デバッグ情報", expanded=False):
+            st.subheader("target_dict の中身:")
+            st.json(target_dict)
+            
+            if target_dict:
+                st.subheader("診療科別目標値:")
+                for dept, target in target_dict.items():
+                    st.write(f"• {dept}: {target}")
+                
+                # 合計計算
+                total_target = sum(target_dict.values()) if target_dict else 0
+                st.write(f"**合計目標:** {total_target:.1f} 件/週")
+                st.write(f"**日割り目標:** {total_target/7:.1f} 件/日")
+            else:
+                st.write("目標データが設定されていません")
+
         # 完全週データオプション
         use_complete_weeks = st.toggle(
             "完全週データで分析", 
