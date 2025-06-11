@@ -28,15 +28,16 @@ class PageRouter:
             from ui.pages.dashboard_page import DashboardPage
             from ui.pages.data_management_page import DataManagementPage
             
-            # 一時的に利用可能なページのみ設定
+            # 利用可能なページを設定
             self._pages = {
                 "ダッシュボード": DashboardPage.render,
+                "データアップロード": self._render_upload_page_legacy,  # 一時的に元の関数使用
                 "データ管理": DataManagementPage.render,
             }
             
             # 他のページは一時的にフォールバック
             fallback_pages = [
-                "データアップロード", "病院全体分析", "診療科別分析", "術者分析", "将来予測"
+                "病院全体分析", "診療科別分析", "術者分析", "将来予測"
             ]
             for page in fallback_pages:
                 self._pages[page] = self._render_fallback_page
@@ -160,6 +161,84 @@ class PageRouter:
         if st.button("🏠 ダッシュボードに戻る"):
             SessionManager.set_current_view("ダッシュボード")
             st.rerun()
+    
+    def _render_upload_page_legacy(self) -> None:
+        """元のapp.pyから移植したアップロードページ"""
+        import traceback
+        from datetime import datetime
+        from data_processing import loader
+        from config import target_loader
+        from data_persistence import save_data_to_file, create_backup, get_data_info
+        
+        st.header("📤 データアップロード")
+        
+        # 既存の保存データがある場合の警告
+        data_info = get_data_info()
+        if data_info:
+            st.warning("💾 既に保存されたデータがあります。新しいデータをアップロードすると上書きされます。")
+            with st.expander("保存データの詳細"):
+                st.json(data_info)
+        
+        base_file = st.file_uploader("基礎データ (CSV)", type="csv")
+        update_files = st.file_uploader("追加データ (CSV)", type="csv", accept_multiple_files=True)
+        target_file = st.file_uploader("目標データ (CSV)", type="csv")
+        
+        # データ保存設定
+        st.subheader("📁 データ保存設定")
+        col1, col2 = st.columns(2)
+        with col1:
+            auto_save = st.checkbox("処理完了後にデータを自動保存", value=True, help="次回起動時に自動でデータが読み込まれます")
+        with col2:
+            create_backup_checkbox = st.checkbox("処理前にバックアップを作成", value=True, help="現在のデータをバックアップしてから新データを処理します")
+        
+        if st.button("データ処理を実行", type="primary"):
+            with st.spinner("データ処理中..."):
+                try:
+                    # バックアップ作成
+                    if create_backup_checkbox:
+                        backup_success = create_backup(force_create=True)
+                        if backup_success:
+                            st.success("✅ バックアップを作成しました")
+                        else:
+                            st.warning("⚠️ バックアップ作成に失敗しましたが、処理を続行します")
+                    
+                    # データ処理
+                    if base_file:
+                        df = loader.load_and_merge_files(base_file, update_files)
+                        SessionManager.set_processed_df(df)
+                        SessionManager.set_data_source('file_upload')
+                        
+                        if not df.empty: 
+                            SessionManager.set_latest_date(df['手術実施日_dt'].max())
+                        
+                        st.success(f"✅ データ処理完了。{len(df)}件のレコードが読み込まれました。")
+                        
+                        # 目標データの処理
+                        target_dict = {}
+                        if target_file:
+                            target_dict = target_loader.load_target_file(target_file)
+                            SessionManager.set_target_dict(target_dict)
+                            st.success(f"✅ 目標データを読み込みました。{len(target_dict)}件の診療科目標を設定。")
+                        
+                        # 自動保存
+                        if auto_save:
+                            save_success = save_data_to_file(df, target_dict, {
+                                'upload_time': datetime.now().isoformat(),
+                                'base_file_name': base_file.name,
+                                'update_files_count': len(update_files) if update_files else 0,
+                                'target_file_name': target_file.name if target_file else None
+                            })
+                            
+                            if save_success:
+                                st.success("💾 データを保存しました。次回起動時に自動で読み込まれます。")
+                            else:
+                                st.error("❌ データ保存に失敗しました。")
+                    else:
+                        st.warning("基礎データファイルをアップロードしてください。")
+                        
+                except Exception as e:
+                    st.error(f"エラー: {e}")
+                    st.code(traceback.format_exc())
     
     def get_available_pages(self) -> list:
         """利用可能なページ一覧を取得"""
