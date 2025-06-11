@@ -16,6 +16,14 @@ from ui.error_handler import safe_streamlit_operation, safe_data_operation
 from analysis import weekly, ranking
 from plotting import trend_plots, generic_plots
 
+# 追加の統計分析用ライブラリ（オプション）
+try:
+    from sklearn.linear_model import LinearRegression
+    import numpy as np
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +34,7 @@ class HospitalPage:
     @safe_streamlit_operation("病院全体分析ページ描画")
     def render() -> None:
         """病院全体分析ページを描画"""
-        st.title("🏥 病院全体分析 (完全週データ)")
+        st.title("🏥 病院全体分析 - 詳細分析")
         
         # データ取得
         df = SessionManager.get_processed_df()
@@ -36,11 +44,17 @@ class HospitalPage:
         # 分析期間情報の表示
         HospitalPage._render_analysis_period_info(df, latest_date)
         
-        # 診療科別パフォーマンスダッシュボード
-        HospitalPage._render_performance_dashboard(df, target_dict, latest_date)
+        # 週次推移グラフ（複数パターン）
+        HospitalPage._render_multiple_trend_patterns(df, target_dict)
         
-        # 週次推移グラフ
-        HospitalPage._render_weekly_trend_section(df, target_dict)
+        # 統計分析セクション
+        HospitalPage._render_statistical_analysis(df, latest_date)
+        
+        # 期間別比較セクション
+        HospitalPage._render_period_comparison(df, target_dict, latest_date)
+        
+        # トレンド分析セクション
+        HospitalPage._render_trend_analysis(df, latest_date)
     
     @staticmethod
     @safe_data_operation("分析期間情報表示")
