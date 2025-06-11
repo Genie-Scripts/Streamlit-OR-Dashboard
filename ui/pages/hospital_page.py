@@ -118,8 +118,16 @@ class HospitalPage:
                     summary_ma = summary.copy()
                     summary_ma['4週移動平均'] = summary_ma['平日1日平均件数'].rolling(window=4).mean()
                     
-                    fig2 = trend_plots.create_moving_average_chart(summary_ma)
+                    # 移動平均チャートを既存関数で作成
+                    fig2 = trend_plots.create_weekly_summary_chart(
+                        summary_ma, "移動平均トレンド（4週移動平均）", target_dict
+                    )
                     st.plotly_chart(fig2, use_container_width=True)
+                    
+                    # 移動平均の数値テーブル
+                    with st.expander("移動平均データ"):
+                        ma_display = summary_ma[['週開始日', '平日1日平均件数', '4週移動平均']].dropna()
+                        st.dataframe(ma_display.round(1), use_container_width=True)
                 else:
                     st.info("移動平均計算には最低4週間のデータが必要です。")
             
@@ -132,8 +140,23 @@ class HospitalPage:
                     summary_target = summary.copy()
                     summary_target['達成率(%)'] = (summary_target['平日1日平均件数'] / hospital_target * 100)
                     
-                    fig3 = trend_plots.create_achievement_trend_chart(summary_target)
+                    # 達成率チャートを既存関数で作成
+                    fig3 = trend_plots.create_weekly_summary_chart(
+                        summary_target, "目標達成率推移", target_dict
+                    )
                     st.plotly_chart(fig3, use_container_width=True)
+                    
+                    # 達成率統計
+                    avg_achievement = summary_target['達成率(%)'].mean()
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("平均達成率", f"{avg_achievement:.1f}%")
+                    with col2:
+                        above_target = len(summary_target[summary_target['達成率(%)'] >= 100])
+                        st.metric("目標達成週数", f"{above_target}/{len(summary_target)}週")
+                    with col3:
+                        max_achievement = summary_target['達成率(%)'].max()
+                        st.metric("最高達成率", f"{max_achievement:.1f}%")
                 else:
                     st.info("目標データが設定されていません。")
             
