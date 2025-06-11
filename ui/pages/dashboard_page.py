@@ -286,8 +286,10 @@ class DashboardPage:
             if weekday_df.empty:
                 return 0.0, 0, 0
             
-            # 手術室フィルタリング（簡易版）
-            or_columns = ['手術室', 'OR', 'OP室', '実施手術室']
+            logger.info(f"平日データ件数: {len(weekday_df)}")
+            
+            # 手術室フィルタリング
+            or_columns = ['手術室', 'OR', 'OP室', '実施手術室', '実施OP', 'OR番号']
             or_column = None
             
             for col in or_columns:
@@ -296,28 +298,52 @@ class DashboardPage:
                     break
             
             if or_column:
-                # OP-1からOP-12を含む手術室を抽出（簡易版）
+                logger.info(f"手術室列を発見: {or_column}")
+                # データサンプルをログ出力
+                unique_ors = weekday_df[or_column].dropna().unique()
+                logger.info(f"手術室一覧（最初の10個）: {unique_ors[:10]}")
+                
+                # より緩い条件でフィルタリング（デバッグ用）
                 weekday_df['or_str'] = weekday_df[or_column].astype(str)
-                or_filtered_df = weekday_df[
-                    weekday_df['or_str'].str.contains('OP-', na=False) &
-                    ~weekday_df['or_str'].str.contains('OP-11A', na=False) &
-                    ~weekday_df['or_str'].str.contains('OP-11B', na=False)
-                ]
+                
+                # まずOP-を含む手術室を確認
+                op_rooms = weekday_df[weekday_df['or_str'].str.contains('OP', na=False, case=False)]
+                logger.info(f"OP系手術室データ件数: {len(op_rooms)}")
+                
+                if len(op_rooms) > 0:
+                    # OP-11A、OP-11Bを除く
+                    or_filtered_df = op_rooms[
+                        ~op_rooms['or_str'].str.contains('OP-11A', na=False, case=False) &
+                        ~op_rooms['or_str'].str.contains('OP-11B', na=False, case=False)
+                    ]
+                    logger.info(f"OP-11A,11B除外後: {len(or_filtered_df)}")
+                else:
+                    # OPを含まない場合は全データを使用
+                    logger.warning("OP系手術室が見つからないため、全平日データを使用")
+                    or_filtered_df = weekday_df
             else:
                 logger.warning("手術室列が見つからないため、全データを使用")
+                # 利用可能な列をログ出力
+                logger.info(f"利用可能な列: {list(weekday_df.columns)}")
                 or_filtered_df = weekday_df
             
-            # 時刻フィルタリング：9:00〜17:15
-            time_filtered_df = DashboardPage._filter_operating_hours(or_filtered_df)
+            logger.info(f"手術室フィルタリング後: {len(or_filtered_df)}")
+            
+            # 時刻フィルタリング
+            time_filtered_df = DashboardPage._filter_operating_hours_debug(or_filtered_df)
+            logger.info(f"時刻フィルタリング後: {len(time_filtered_df)}")
             
             # 手術時間の計算
-            actual_minutes = DashboardPage._calculate_surgery_minutes(time_filtered_df)
+            actual_minutes = DashboardPage._calculate_surgery_minutes_debug(time_filtered_df)
+            logger.info(f"実際の手術時間: {actual_minutes}分")
             
             # 分母：理論上の最大稼働時間
             max_minutes = 495 * 11 * weekdays
+            logger.info(f"最大稼働時間: {max_minutes}分 (495分×11室×{weekdays}平日)")
             
             # 稼働率計算
             utilization_rate = (actual_minutes / max_minutes * 100) if max_minutes > 0 else 0.0
+            logger.info(f"稼働率: {utilization_rate:.2f}%")
             
             return utilization_rate, actual_minutes, max_minutes
             
@@ -326,24 +352,34 @@ class DashboardPage:
             return 0.0, 0, 0
     
     @staticmethod
-    def _filter_operating_hours(df: pd.DataFrame) -> pd.DataFrame:
-        """9:00〜17:15の手術をフィルタリング"""
+    def _filter_operating_hours_debug(df: pd.DataFrame) -> pd.DataFrame:
+        """9:00〜17:15の手術をフィルタリング（デバッグ版）"""
         try:
             if df.empty:
                 return df
             
             # 手術開始時刻の列を探す
-            time_columns = ['手術開始時刻', '開始時刻', '手術開始時間', 'start_time']
+            time_columns = ['手術開始時刻', '開始時刻', '手術開始時間', 'start_time', '開始時間', 'OP開始時刻']
             time_column = None
+            
+            logger.info(f"利用可能な列: {list(df.columns)}")
             
             for col in time_columns:
                 if col in df.columns:
                     time_column = col
+                    logger.info(f"時刻列を発見: {time_column}")
                     break
             
             if not time_column:
                 logger.warning("手術開始時刻列が見つからないため、時刻フィルタリングをスキップ")
+                # 時刻データサンプルを表示
+                potential_time_cols = [col for col in df.columns if '時' in col or 'time' in col.lower()]
+                logger.info(f"時刻関連の列候補: {potential_time_cols}")
                 return df
+            
+            # 時刻データのサンプルをログ出力
+            sample_times = df[time_column].dropna().head(10).tolist()
+            logger.info(f"時刻データサンプル: {sample_times}")
             
             def parse_time_to_minutes(time_str):
                 """時刻文字列を分単位に変換"""
@@ -359,11 +395,21 @@ class DashboardPage:
                         hour = time_num // 100
                         minute = time_num % 100
                         return hour * 60 + minute
-                except:
+                except Exception as e:
+                    logger.warning(f"時刻解析エラー: {time_str} -> {e}")
                     return None
             
             df_filtered = df.copy()
             df_filtered['start_minutes'] = df_filtered[time_column].apply(parse_time_to_minutes)
+            
+            # 有効な時刻データの統計
+            valid_times = df_filtered['start_minutes'].dropna()
+            if len(valid_times) > 0:
+                logger.info(f"有効な時刻データ: {len(valid_times)}件")
+                logger.info(f"時刻範囲: {valid_times.min()}分({valid_times.min()//60}:{valid_times.min()%60:02d}) - {valid_times.max()}分({valid_times.max()//60}:{valid_times.max()%60:02d})")
+            else:
+                logger.warning("有効な時刻データが0件")
+                return df
             
             # 9:00（540分）〜17:15（1035分）でフィルタリング
             filtered_df = df_filtered[
@@ -372,6 +418,8 @@ class DashboardPage:
                 (df_filtered['start_minutes'].notna())
             ]
             
+            logger.info(f"時刻フィルタリング: {len(df)} -> {len(filtered_df)}")
+            
             return filtered_df
             
         except Exception as e:
@@ -379,31 +427,40 @@ class DashboardPage:
             return df
     
     @staticmethod
-    def _calculate_surgery_minutes(df: pd.DataFrame) -> int:
-        """手術時間の合計を分単位で計算"""
+    def _calculate_surgery_minutes_debug(df: pd.DataFrame) -> int:
+        """手術時間の合計を分単位で計算（デバッグ版）"""
         try:
             if df.empty:
+                logger.info("手術時間計算: データが空")
                 return 0
             
+            logger.info(f"手術時間計算開始: {len(df)}件")
+            
             # 手術時間の列を探す
-            duration_columns = ['手術時間', '所要時間', '手術時間（分）', 'duration', 'surgery_time']
+            duration_columns = ['手術時間', '所要時間', '手術時間（分）', 'duration', 'surgery_time', '実施時間', 'OP時間']
             duration_column = None
             
             for col in duration_columns:
                 if col in df.columns:
                     duration_column = col
+                    logger.info(f"手術時間列を発見: {duration_column}")
                     break
             
             if duration_column:
                 try:
+                    # 手術時間データのサンプルをログ出力
+                    sample_durations = df[duration_column].dropna().head(10).tolist()
+                    logger.info(f"手術時間サンプル: {sample_durations}")
+                    
                     total_minutes = df[duration_column].fillna(0).sum()
+                    logger.info(f"手術時間列から合計: {total_minutes}分")
                     return int(total_minutes)
-                except:
-                    logger.warning(f"手術時間列 {duration_column} の計算でエラー")
+                except Exception as e:
+                    logger.warning(f"手術時間列 {duration_column} の計算でエラー: {e}")
             
             # 手術時間列がない場合、開始時刻と終了時刻から計算
-            start_columns = ['手術開始時刻', '開始時刻', '手術開始時間']
-            end_columns = ['手術終了時刻', '終了時刻', '手術終了時間']
+            start_columns = ['手術開始時刻', '開始時刻', '手術開始時間', 'OP開始時刻']
+            end_columns = ['手術終了時刻', '終了時刻', '手術終了時間', 'OP終了時刻']
             
             start_col = None
             end_col = None
@@ -417,6 +474,8 @@ class DashboardPage:
                 if col in df.columns:
                     end_col = col
                     break
+            
+            logger.info(f"開始時刻列: {start_col}, 終了時刻列: {end_col}")
             
             if start_col and end_col:
                 def time_to_minutes(time_str):
@@ -434,6 +493,10 @@ class DashboardPage:
                 df_calc['start_min'] = df_calc[start_col].apply(time_to_minutes)
                 df_calc['end_min'] = df_calc[end_col].apply(time_to_minutes)
                 
+                # サンプルデータをログ出力
+                sample_data = df_calc[['start_min', 'end_min']].dropna().head(5)
+                logger.info(f"開始・終了時刻サンプル:\n{sample_data}")
+                
                 # 終了時刻が開始時刻より小さい場合は翌日とみなす
                 df_calc.loc[df_calc['end_min'] < df_calc['start_min'], 'end_min'] += 24 * 60
                 
@@ -446,15 +509,35 @@ class DashboardPage:
                     (df_calc['duration'].notna())
                 ]['duration']
                 
+                logger.info(f"有効な手術時間データ: {len(valid_durations)}件")
+                if len(valid_durations) > 0:
+                    logger.info(f"手術時間統計: 平均{valid_durations.mean():.1f}分, 合計{valid_durations.sum():.0f}分")
+                
                 return int(valid_durations.sum())
             
             # フォールバック：件数ベースで推定（平均60分/件と仮定）
             logger.warning("手術時間を計算できないため、件数ベースで推定（60分/件）")
-            return len(df) * 60
+            estimated_minutes = len(df) * 60
+            logger.info(f"推定手術時間: {estimated_minutes}分 ({len(df)}件 × 60分)")
+            return estimated_minutes
             
         except Exception as e:
             logger.error(f"手術時間計算エラー: {e}")
-            return len(df) * 60
+            fallback_minutes = len(df) * 60
+            logger.info(f"エラー時フォールバック: {fallback_minutes}分")
+            return fallback_minutes
+    
+    @staticmethod
+    def _filter_operating_hours(df: pd.DataFrame) -> pd.DataFrame:
+        """9:00〜17:15の手術をフィルタリング"""
+        # デバッグ版を呼び出し
+        return DashboardPage._filter_operating_hours_debug(df)
+    
+    @staticmethod
+    def _calculate_surgery_minutes(df: pd.DataFrame) -> int:
+        """手術時間の合計を分単位で計算"""
+        # デバッグ版を呼び出し
+        return DashboardPage._calculate_surgery_minutes_debug(df)
     
     @staticmethod
     def _display_period_kpi_metrics(kpi_data: Dict[str, Any], 
