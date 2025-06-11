@@ -487,16 +487,17 @@ class PDFReportGenerator:
         
         for chart_name, fig in charts.items():
             try:
-                # グラフの文字化け対策：フォント設定とテキストのサニタイズ
+                # グラフの文字化け対策：完全英語化
                 fig_clean = self._sanitize_plotly_figure(fig)
                 
-                # Plotlyグラフを画像に変換（エンコーディング設定を追加）
+                # Plotlyグラフを画像に変換（設定最適化）
                 img_bytes = pio.to_image(
                     fig_clean, 
                     format="png", 
                     width=800, 
                     height=400,
-                    engine="kaleido"  # エンジンを明示的に指定
+                    engine="kaleido",
+                    validate=False  # 検証を無効化してエラーを回避
                 )
                 img_buffer = BytesIO(img_bytes)
                 
@@ -504,84 +505,246 @@ class PDFReportGenerator:
                 img = Image(img_buffer, width=6*inch, height=3*inch)
                 story.append(img)
                 
-                # キャプション
+                # キャプション（英語化）
                 clean_chart_name = self._sanitize_text_safe(chart_name)
-                caption = Paragraph(f"図: {clean_chart_name}", self.styles['CustomNormal'])
+                if not clean_chart_name or clean_chart_name == "Chart Data":
+                    clean_chart_name = "Surgery Analysis Chart"
+                caption = Paragraph(f"Figure: {clean_chart_name}", self.styles['CustomNormal'])
                 story.append(caption)
                 story.append(Spacer(1, 0.2*inch))
                 
             except Exception as e:
                 logger.error(f"グラフ変換エラー ({chart_name}): {e}")
-                error_text = Paragraph(f"グラフ '{chart_name}' の生成でエラーが発生しました", self.styles['CustomNormal'])
-                story.append(error_text)
+                try:
+                    # フォールバック: シンプルなプレースホルダーグラフを作成
+                    fallback_fig = go.Figure()
+                    fallback_fig.add_annotation(
+                        text=f"Chart: {self._sanitize_text_safe(chart_name)}",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5, showarrow=False,
+                        font=dict(family="Arial", size=14, color="black")
+                    )
+                    fallback_fig.update_layout(
+                        title=dict(
+                            text="Surgery Analysis Chart",
+                            font=dict(family="Arial", size=16, color="black")
+                        ),
+                        xaxis=dict(showgrid=False, showticklabels=False),
+                        yaxis=dict(showgrid=False, showticklabels=False),
+                        font=dict(family="Arial", size=10, color="black"),
+                        plot_bgcolor='white',
+                        paper_bgcolor='white'
+                    )
+                    
+                    # フォールバックグラフを画像に変換
+                    fallback_bytes = pio.to_image(
+                        fallback_fig, 
+                        format="png", 
+                        width=800, 
+                        height=400,
+                        engine="kaleido",
+                        validate=False
+                    )
+                    fallback_buffer = BytesIO(fallback_bytes)
+                    
+                    img = Image(fallback_buffer, width=6*inch, height=3*inch)
+                    story.append(img)
+                    
+                    # キャプション（英語化）
+                    clean_chart_name = self._sanitize_text_safe(chart_name)
+                    if not clean_chart_name or clean_chart_name == "Chart Data":
+                        clean_chart_name = "Surgery Analysis Chart"
+                    caption = Paragraph(f"Figure: {clean_chart_name} (simplified)", self.styles['CustomNormal'])
+                    story.append(caption)
+                    story.append(Spacer(1, 0.2*inch))
+                    
+                except Exception as e2:
+                    logger.error(f"フォールバックグラフ作成エラー: {e2}")
+                    # 最終フォールバック: テキストのみ（英語化）
+                    clean_name = self._sanitize_text_safe(chart_name)
+                    if not clean_name or clean_name == "Chart Data":
+                        clean_name = "Surgery Chart"
+                    error_text = Paragraph(
+                        f"Chart '{clean_name}' - Data available but PDF conversion failed", 
+                        self.styles['CustomNormal']
+                    )
+                    story.append(error_text)
+                    story.append(Spacer(1, 0.2*inch))
         
         return story
     
     def _sanitize_plotly_figure(self, fig: go.Figure) -> go.Figure:
-        """Plotlyグラフの文字化け対策"""
+        """Plotlyグラフの文字化け対策（根本的修正）"""
         try:
             # figureのコピーを作成
             fig_copy = go.Figure(fig)
             
-            # レイアウトの文字列をサニタイズ
+            # 日本語→英語辞書
+            jp_to_en = {
+                '週次推移': 'Weekly Trend',
+                '病院全体': 'Hospital Total',
+                '実績': 'Actual',
+                '目標': 'Target',
+                '平均': 'Average',
+                '件数': 'Cases',
+                '日': 'Day',
+                '週': 'Week',
+                '月': 'Month',
+                '年': 'Year',
+                '全身麻酔手術': 'General Anesthesia',
+                '手術件数': 'Surgery Cases',
+                '平日': 'Weekday',
+                '診療科': 'Department',
+                '泌尿器科': 'Urology',
+                '整形外科': 'Orthopedics',
+                '一般消化器外科': 'General Surgery',
+                '皮膚科': 'Dermatology',
+                '乳腺外科': 'Breast Surgery',
+                '形成外科': 'Plastic Surgery',
+                '心臓血管外科': 'Cardiovascular Surgery',
+                '呼吸器外科': 'Thoracic Surgery',
+                '産婦人科': 'Gynecology',
+                '脳神経外科': 'Neurosurgery',
+                '耳鼻咽喉科': 'ENT',
+                '歯科口腔外科': 'Oral Surgery'
+            }
+            
+            def translate_text(text):
+                """日本語テキストを英語に変換"""
+                if not isinstance(text, str):
+                    text = str(text)
+                
+                # 直接辞書マッチング
+                if text in jp_to_en:
+                    return jp_to_en[text]
+                
+                # 部分マッチング
+                for jp, en in jp_to_en.items():
+                    if jp in text:
+                        text = text.replace(jp, en)
+                
+                # 残った日本語文字を除去
+                import re
+                # ASCII文字と基本記号のみ残す
+                text = re.sub(r'[^\x00-\x7F]', '', text)
+                
+                # 空文字の場合はデフォルト値
+                return text if text.strip() else 'Chart'
+            
+            # レイアウトのテキストを英語化
             if fig_copy.layout.title and fig_copy.layout.title.text:
-                fig_copy.layout.title.text = self._sanitize_text_safe(fig_copy.layout.title.text)
+                original_title = fig_copy.layout.title.text
+                translated_title = translate_text(original_title)
+                fig_copy.layout.title.text = translated_title
+                logger.info(f"グラフタイトル変換: {original_title} -> {translated_title}")
             
             if fig_copy.layout.xaxis and fig_copy.layout.xaxis.title and fig_copy.layout.xaxis.title.text:
-                fig_copy.layout.xaxis.title.text = self._sanitize_text_safe(fig_copy.layout.xaxis.title.text)
+                fig_copy.layout.xaxis.title.text = translate_text(fig_copy.layout.xaxis.title.text)
             
             if fig_copy.layout.yaxis and fig_copy.layout.yaxis.title and fig_copy.layout.yaxis.title.text:
-                fig_copy.layout.yaxis.title.text = self._sanitize_text_safe(fig_copy.layout.yaxis.title.text)
+                fig_copy.layout.yaxis.title.text = translate_text(fig_copy.layout.yaxis.title.text)
             
-            # 凡例の文字列をサニタイズ
+            # X軸の目盛りラベルを英語化
+            if hasattr(fig_copy.layout.xaxis, 'ticktext') and fig_copy.layout.xaxis.ticktext:
+                fig_copy.layout.xaxis.ticktext = [translate_text(str(tick)) for tick in fig_copy.layout.xaxis.ticktext]
+            
+            # 凡例とデータ系列の文字列を英語化
             for trace in fig_copy.data:
                 if hasattr(trace, 'name') and trace.name:
-                    trace.name = self._sanitize_text_safe(trace.name)
+                    original_name = trace.name
+                    translated_name = translate_text(trace.name)
+                    trace.name = translated_name
+                    logger.info(f"凡例変換: {original_name} -> {translated_name}")
+                    
                 if hasattr(trace, 'text') and trace.text:
                     if isinstance(trace.text, (list, tuple)):
-                        trace.text = [self._sanitize_text_safe(str(t)) for t in trace.text]
+                        trace.text = [translate_text(str(t)) for t in trace.text]
                     else:
-                        trace.text = self._sanitize_text_safe(str(trace.text))
+                        trace.text = translate_text(str(trace.text))
+                        
+                # ホバーテキストも英語化
+                if hasattr(trace, 'hovertext') and trace.hovertext:
+                    if isinstance(trace.hovertext, (list, tuple)):
+                        trace.hovertext = [translate_text(str(t)) for t in trace.hovertext]
+                    else:
+                        trace.hovertext = translate_text(str(trace.hovertext))
             
             # フォント設定を安全なものに変更
             fig_copy.update_layout(
                 font=dict(
-                    family="Arial, sans-serif",  # 安全なフォント
-                    size=12,
+                    family="Arial, sans-serif",
+                    size=10,
                     color="black"
+                ),
+                # 日本語要素を含む可能性のある設定を英語に
+                title=dict(
+                    font=dict(family="Arial, sans-serif", size=14, color="black")
+                ),
+                xaxis=dict(
+                    title=dict(font=dict(family="Arial, sans-serif", size=10)),
+                    tickfont=dict(family="Arial, sans-serif", size=8)
+                ),
+                yaxis=dict(
+                    title=dict(font=dict(family="Arial, sans-serif", size=10)),
+                    tickfont=dict(family="Arial, sans-serif", size=8)
+                ),
+                legend=dict(
+                    font=dict(family="Arial, sans-serif", size=8)
                 )
             )
             
+            logger.info("Plotlyグラフの英語化完了")
             return fig_copy
             
         except Exception as e:
-            logger.error(f"Plotlyグラフサニタイズエラー: {e}")
-            return fig
+            logger.error(f"Plotlyグラフ英語化エラー: {e}")
+            # エラー時はシンプルなグラフを返す
+            try:
+                fig_simple = go.Figure()
+                fig_simple.add_annotation(
+                    text="Chart data converted for PDF",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(family="Arial", size=12)
+                )
+                fig_simple.update_layout(
+                    title="Surgery Data Chart",
+                    font=dict(family="Arial", size=10)
+                )
+                return fig_simple
+            except:
+                return fig
     
     def _sanitize_text_safe(self, text: str) -> str:
-        """安全な文字列サニタイズ"""
+        """安全な文字列サニタイズ（PDF用最適化）"""
         if not isinstance(text, str):
             text = str(text)
         
-        # 絵文字や特殊文字を除去（より安全な方法）
+        # 空文字チェック
+        if not text.strip():
+            return "Data"
+        
+        # ASCII文字のみを抽出（より厳格）
         import re
+        ascii_only = re.sub(r'[^\x20-\x7E]', '', text)
         
-        # 日本語ひらがな・カタカナ・漢字・英数字・基本記号のみ許可
-        allowed_chars = (
-            r'[\u0020-\u007E'      # ASCII文字
-            r'\u3040-\u309F'       # ひらがな
-            r'\u30A0-\u30FF'       # カタカナ
-            r'\u4E00-\u9FAF'       # 漢字
-            r'\u3000-\u303F'       # 日本語句読点
-            r'\uFF01-\uFF5E'       # 全角英数字
-            r']+'
-        )
+        # 空文字になった場合は意味のあるプレースホルダーを返す
+        if not ascii_only.strip():
+            # 元の文字列の特徴に基づいてプレースホルダーを決定
+            if '週' in text or 'week' in text.lower():
+                return "Weekly"
+            elif '推移' in text or 'trend' in text.lower():
+                return "Trend"
+            elif '実績' in text or 'actual' in text.lower():
+                return "Actual"
+            elif '目標' in text or 'target' in text.lower():
+                return "Target"
+            elif '科' in text or 'dept' in text.lower():
+                return "Department"
+            else:
+                return "Chart Data"
         
-        # 許可文字のみ抽出
-        sanitized = ''.join(re.findall(allowed_chars, text))
-        
-        # 空文字の場合はプレースホルダーを返す
-        return sanitized if sanitized.strip() else "Chart"
+        return ascii_only.strip()
     
     def _create_footer_section(self) -> List:
         """フッターセクションを作成"""
