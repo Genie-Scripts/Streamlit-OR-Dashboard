@@ -171,16 +171,10 @@ class PDFReportGenerator:
             st.error("PDF生成にはreportlabライブラリが必要です")
             return None
         
-        # 文字列のサニタイズ処理
+        # 文字列のサニタイズ処理（改良版）
         def sanitize_text(text):
-            """絵文字や特殊文字を除去"""
-            if not isinstance(text, str):
-                text = str(text)
-            # 絵文字や特殊Unicode文字を除去
-            import re
-            # 基本的な日本語・英数字・記号のみ許可
-            sanitized = re.sub(r'[^\u0020-\u007E\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\u3000\u3001-\u303F\uFF01-\uFF5E]', '', text)
-            return sanitized
+            """絵文字や特殊文字を除去（改良版）"""
+            return self._sanitize_text_safe(text)
         
         # period_infoの文字列をサニタイズ
         sanitized_period_info = {}
@@ -257,17 +251,17 @@ class PDFReportGenerator:
         # メインタイトル（絵文字を除去）
         title = Paragraph("手術分析ダッシュボード", self.styles['CustomTitle'])
         story.append(title)
-        story.append(Spacer(1, 0.5*inch))
+        story.append(Spacer(1, 0.8*inch))
         
         # サブタイトル
-        subtitle = Paragraph("管理者向けサマリーレポート", self.styles['Heading2'])
+        subtitle = Paragraph("管理者向けサマリーレポート", self.styles['CustomHeading'])
         story.append(subtitle)
         story.append(Spacer(1, 0.5*inch))
         
-        # 期間情報
+        # 期間情報（改行と書式を調整）
         period_text = f"""
-        <b>分析期間:</b> {period_info.get('period_name', 'N/A')}<br/>
-        <b>対象日:</b> {period_info.get('start_date', 'N/A')} ～ {period_info.get('end_date', 'N/A')}<br/>
+        <b>分析期間:</b> {period_info.get('period_name', 'N/A')}<br/><br/>
+        <b>対象日:</b> {period_info.get('start_date', 'N/A')} ～ {period_info.get('end_date', 'N/A')}<br/><br/>
         <b>分析日数:</b> {period_info.get('total_days', 'N/A')}日間 (平日: {period_info.get('weekdays', 'N/A')}日)<br/>
         """
         period_para = Paragraph(period_text, self.styles['CustomNormal'])
@@ -276,7 +270,7 @@ class PDFReportGenerator:
         
         # 生成情報
         generated_text = f"""
-        <b>レポート生成日時:</b> {datetime.now().strftime('%Y年%m月%d日 %H:%M')}<br/>
+        <b>レポート生成日時:</b> {datetime.now().strftime('%Y年%m月%d日 %H:%M')}<br/><br/>
         <b>生成システム:</b> 手術分析ダッシュボード v1.0
         """
         generated_para = Paragraph(generated_text, self.styles['CustomNormal'])
@@ -322,46 +316,49 @@ class PDFReportGenerator:
         # セクションタイトル（絵文字を除去）
         story.append(Paragraph("主要業績指標 (KPI)", self.styles['CustomHeading']))
         
-        # KPI テーブルデータ
+        # KPI テーブルデータ（改行を追加して2段表示）
         kpi_table_data = [
             ['指標', '値', '単位', '備考'],
             [
                 '全身麻酔手術件数',
                 f"{kpi_data.get('gas_cases', 0):,}",
                 '件',
-                '20分以上の全身麻酔手術'
+                '20分以上の<br/>全身麻酔手術'
             ],
             [
                 '全手術件数',
                 f"{kpi_data.get('total_cases', 0):,}",
                 '件',
-                '全ての手術（全身麻酔以外も含む）'
+                '全ての手術<br/>（局麻等含む）'
             ],
             [
-                '平日1日あたり全身麻酔手術',
+                '平日1日あたり<br/>全身麻酔手術',
                 f"{kpi_data.get('daily_avg_gas', 0):.1f}",
                 '件/日',
-                '平日（月〜金）の平均'
+                '平日（月〜金）<br/>の平均'
             ],
             [
                 '手術室稼働率',
                 f"{kpi_data.get('utilization_rate', 0):.1f}",
                 '%',
-                'OP-1〜12の実稼働時間ベース'
+                'OP-1〜12の<br/>実稼働時間ベース'
             ]
         ]
         
-        # テーブル作成
-        kpi_table = Table(kpi_table_data, colWidths=[4*cm, 2.5*cm, 1.5*cm, 4*cm])
+        # テーブル作成（幅を調整）
+        kpi_table = Table(kpi_table_data, colWidths=[3.5*cm, 2*cm, 1.5*cm, 3.5*cm])
         kpi_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),  # 縦方向中央揃え
             ('FONTNAME', (0, 0), (-1, 0), JAPANESE_FONT_BOLD),  # ヘッダーは太字
             ('FONTNAME', (0, 1), (-1, -1), JAPANESE_FONT),      # データ部分は通常
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('FONTSIZE', (0, 0), (-1, 0), 11),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
             ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
             ('GRID', (0, 0), (-1, -1), 1, colors.black)
         ]))
@@ -393,28 +390,43 @@ class PDFReportGenerator:
         # セクションタイトル（絵文字を除去）
         story.append(Paragraph("診療科別パフォーマンス", self.styles['CustomHeading']))
         
-        # パフォーマンステーブル
-        perf_table_data = [['診療科', '期間平均', '直近週実績', '週次目標', '達成率(%)']]
+        # パフォーマンステーブル（改行を追加）
+        perf_table_data = [['診療科', '期間<br/>平均', '直近週<br/>実績', '週次<br/>目標', '達成率<br/>(%)']]
         
         for _, row in performance_data.iterrows():
+            dept_name = self._sanitize_text_safe(str(row['診療科']))
+            # 長い診療科名の場合は改行
+            if len(dept_name) > 6:
+                # 適切な位置で改行を挿入
+                if '外科' in dept_name:
+                    dept_name = dept_name.replace('外科', '<br/>外科')
+                elif '科' in dept_name and len(dept_name) > 8:
+                    parts = dept_name.split('科')
+                    if len(parts) > 1:
+                        dept_name = parts[0] + '科<br/>' + '科'.join(parts[1:])
+            
             perf_table_data.append([
-                str(row['診療科']),
+                dept_name,
                 f"{row['期間平均']:.1f}",
                 f"{row['直近週実績']:.0f}",
                 f"{row['週次目標']:.1f}",
                 f"{row['達成率(%)']:.1f}"
             ])
         
-        perf_table = Table(perf_table_data, colWidths=[3*cm, 2*cm, 2*cm, 2*cm, 2*cm])
+        # テーブル作成（幅を調整）
+        perf_table = Table(perf_table_data, colWidths=[3*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.8*cm])
         perf_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),  # 縦方向中央揃え
             ('FONTNAME', (0, 0), (-1, 0), JAPANESE_FONT_BOLD),  # ヘッダーは太字
             ('FONTNAME', (0, 1), (-1, -1), JAPANESE_FONT),      # データ部分は通常
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('FONTSIZE', (0, 1), (-1, -1), 9),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
             ('BACKGROUND', (0, 1), (-1, -1), colors.lightblue),
             ('GRID', (0, 0), (-1, -1), 1, colors.black)
         ]))
@@ -434,7 +446,8 @@ class PDFReportGenerator:
         
         if len(high_performers) > 0:
             top_dept = high_performers.iloc[0]
-            analysis_text += f"・ 最高達成率: {top_dept['診療科']} ({top_dept['達成率(%)']:.1f}%)<br/>"
+            top_dept_name = self._sanitize_text_safe(str(top_dept['診療科']))
+            analysis_text += f"・ 最高達成率: {top_dept_name} ({top_dept['達成率(%)']:.1f}%)<br/>"
         
         analysis_para = Paragraph(analysis_text, self.styles['CustomNormal'])
         story.append(analysis_para)
@@ -451,8 +464,17 @@ class PDFReportGenerator:
         
         for chart_name, fig in charts.items():
             try:
-                # Plotlyグラフを画像に変換
-                img_bytes = pio.to_image(fig, format="png", width=800, height=400)
+                # グラフの文字化け対策：フォント設定とテキストのサニタイズ
+                fig_clean = self._sanitize_plotly_figure(fig)
+                
+                # Plotlyグラフを画像に変換（エンコーディング設定を追加）
+                img_bytes = pio.to_image(
+                    fig_clean, 
+                    format="png", 
+                    width=800, 
+                    height=400,
+                    engine="kaleido"  # エンジンを明示的に指定
+                )
                 img_buffer = BytesIO(img_bytes)
                 
                 # レポートラブImage作成
@@ -460,7 +482,8 @@ class PDFReportGenerator:
                 story.append(img)
                 
                 # キャプション
-                caption = Paragraph(f"図: {chart_name}", self.styles['CustomNormal'])
+                clean_chart_name = self._sanitize_text_safe(chart_name)
+                caption = Paragraph(f"図: {clean_chart_name}", self.styles['CustomNormal'])
                 story.append(caption)
                 story.append(Spacer(1, 0.2*inch))
                 
@@ -470,6 +493,72 @@ class PDFReportGenerator:
                 story.append(error_text)
         
         return story
+    
+    def _sanitize_plotly_figure(self, fig: go.Figure) -> go.Figure:
+        """Plotlyグラフの文字化け対策"""
+        try:
+            # figureのコピーを作成
+            fig_copy = go.Figure(fig)
+            
+            # レイアウトの文字列をサニタイズ
+            if fig_copy.layout.title and fig_copy.layout.title.text:
+                fig_copy.layout.title.text = self._sanitize_text_safe(fig_copy.layout.title.text)
+            
+            if fig_copy.layout.xaxis and fig_copy.layout.xaxis.title and fig_copy.layout.xaxis.title.text:
+                fig_copy.layout.xaxis.title.text = self._sanitize_text_safe(fig_copy.layout.xaxis.title.text)
+            
+            if fig_copy.layout.yaxis and fig_copy.layout.yaxis.title and fig_copy.layout.yaxis.title.text:
+                fig_copy.layout.yaxis.title.text = self._sanitize_text_safe(fig_copy.layout.yaxis.title.text)
+            
+            # 凡例の文字列をサニタイズ
+            for trace in fig_copy.data:
+                if hasattr(trace, 'name') and trace.name:
+                    trace.name = self._sanitize_text_safe(trace.name)
+                if hasattr(trace, 'text') and trace.text:
+                    if isinstance(trace.text, (list, tuple)):
+                        trace.text = [self._sanitize_text_safe(str(t)) for t in trace.text]
+                    else:
+                        trace.text = self._sanitize_text_safe(str(trace.text))
+            
+            # フォント設定を安全なものに変更
+            fig_copy.update_layout(
+                font=dict(
+                    family="Arial, sans-serif",  # 安全なフォント
+                    size=12,
+                    color="black"
+                )
+            )
+            
+            return fig_copy
+            
+        except Exception as e:
+            logger.error(f"Plotlyグラフサニタイズエラー: {e}")
+            return fig
+    
+    def _sanitize_text_safe(self, text: str) -> str:
+        """安全な文字列サニタイズ"""
+        if not isinstance(text, str):
+            text = str(text)
+        
+        # 絵文字や特殊文字を除去（より安全な方法）
+        import re
+        
+        # 日本語ひらがな・カタカナ・漢字・英数字・基本記号のみ許可
+        allowed_chars = (
+            r'[\u0020-\u007E'      # ASCII文字
+            r'\u3040-\u309F'       # ひらがな
+            r'\u30A0-\u30FF'       # カタカナ
+            r'\u4E00-\u9FAF'       # 漢字
+            r'\u3000-\u303F'       # 日本語句読点
+            r'\uFF01-\uFF5E'       # 全角英数字
+            r']+'
+        )
+        
+        # 許可文字のみ抽出
+        sanitized = ''.join(re.findall(allowed_chars, text))
+        
+        # 空文字の場合はプレースホルダーを返す
+        return sanitized if sanitized.strip() else "Chart"
     
     def _create_footer_section(self) -> List:
         """フッターセクションを作成"""
