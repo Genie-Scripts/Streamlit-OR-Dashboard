@@ -92,6 +92,9 @@ class SurgeonPage:
             surgeon_summary = surgeon.get_surgeon_summary(target_df)
             
             if not surgeon_summary.empty:
+                # デバッグ: 列名を確認
+                st.write(f"🔍 デバッグ: 術者サマリーの列名: {surgeon_summary.columns.tolist()}")
+                
                 # ランキンググラフ
                 fig = generic_plots.plot_surgeon_ranking(surgeon_summary, top_n, selected_dept)
                 st.plotly_chart(fig, use_container_width=True)
@@ -127,21 +130,58 @@ class SurgeonPage:
             
             with col2:
                 st.write("**実績統計:**")
-                total_cases = surgeon_summary['手術件数'].sum()
-                avg_cases = surgeon_summary['手術件数'].mean()
-                st.write(f"• 総手術件数: {total_cases:,}件")
-                st.write(f"• 平均件数/術者: {avg_cases:.1f}件")
+                if '手術件数' in surgeon_summary.columns:
+                    total_cases = surgeon_summary['手術件数'].sum()
+                    avg_cases = surgeon_summary['手術件数'].mean()
+                    st.write(f"• 総手術件数: {total_cases:,}件")
+                    st.write(f"• 平均件数/術者: {avg_cases:.1f}件")
+                else:
+                    # 列名を確認して適切な列を使用
+                    available_cols = surgeon_summary.columns.tolist()
+                    st.write(f"• 利用可能な列: {available_cols}")
+                    
+                    # 件数に関連する列を探す
+                    count_cols = [col for col in available_cols if '件数' in col or 'count' in col.lower()]
+                    if count_cols:
+                        count_col = count_cols[0]
+                        total_cases = surgeon_summary[count_col].sum()
+                        avg_cases = surgeon_summary[count_col].mean()
+                        st.write(f"• 総手術件数: {total_cases:,}件")
+                        st.write(f"• 平均件数/術者: {avg_cases:.1f}件")
+                    else:
+                        st.write("• 手術件数データが見つかりません")
             
             with col3:
                 st.write("**分布統計:**")
-                max_cases = surgeon_summary['手術件数'].max()
-                min_cases = surgeon_summary['手術件数'].min()
-                st.write(f"• 最多件数: {max_cases}件")
-                st.write(f"• 最少件数: {min_cases}件")
-                
-                if len(surgeon_summary) >= 2:
-                    top_surgeon = surgeon_summary.iloc[0]
-                    st.write(f"• トップ術者: {top_surgeon['実施術者']} ({top_surgeon['手術件数']}件)")
+                if '手術件数' in surgeon_summary.columns:
+                    max_cases = surgeon_summary['手術件数'].max()
+                    min_cases = surgeon_summary['手術件数'].min()
+                    st.write(f"• 最多件数: {max_cases}件")
+                    st.write(f"• 最少件数: {min_cases}件")
+                    
+                    if len(surgeon_summary) >= 2:
+                        top_surgeon = surgeon_summary.iloc[0]
+                        surgeon_name = top_surgeon.get('実施術者', '不明')
+                        surgeon_cases = top_surgeon.get('手術件数', 0)
+                        st.write(f"• トップ術者: {surgeon_name} ({surgeon_cases}件)")
+                else:
+                    # 列名を確認して適切な列を使用
+                    available_cols = surgeon_summary.columns.tolist()
+                    count_cols = [col for col in available_cols if '件数' in col or 'count' in col.lower()]
+                    if count_cols:
+                        count_col = count_cols[0]
+                        max_cases = surgeon_summary[count_col].max()
+                        min_cases = surgeon_summary[count_col].min()
+                        st.write(f"• 最多件数: {max_cases}件")
+                        st.write(f"• 最少件数: {min_cases}件")
+                        
+                        if len(surgeon_summary) >= 2:
+                            top_surgeon = surgeon_summary.iloc[0]
+                            surgeon_name = top_surgeon.get('実施術者', '不明')
+                            surgeon_cases = top_surgeon.get(count_col, 0)
+                            st.write(f"• トップ術者: {surgeon_name} ({surgeon_cases}件)")
+                    else:
+                        st.write("• 分布統計データが見つかりません")
     
     @staticmethod
     @safe_data_operation("個別術者分析")
