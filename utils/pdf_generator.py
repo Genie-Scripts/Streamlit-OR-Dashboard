@@ -27,7 +27,6 @@ try:
     from reportlab.pdfbase import pdfutils
     from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.pdfbase import pdfmetrics
-    import os
     
     # 日本語フォント設定（fontsフォルダーのNotoSansJPを使用）
     try:
@@ -41,6 +40,9 @@ try:
             'NotoSansJP-Light': 'NotoSansJP-Light.ttf',
             'NotoSansJP-Medium': 'NotoSansJP-Medium.ttf'
         }
+        
+        # ロガー設定（フォント登録前に必要）
+        logger = logging.getLogger(__name__)
         
         # フォント登録
         registered_fonts = {}
@@ -72,6 +74,7 @@ try:
             
     except Exception as e:
         # 最終フォールバック
+        logger = logging.getLogger(__name__)
         logger.error(f"日本語フォント設定エラー: {e}")
         JAPANESE_FONT = 'Helvetica'
         JAPANESE_FONT_BOLD = 'Helvetica-Bold'
@@ -79,17 +82,15 @@ try:
         logger.warning("日本語フォントを設定できませんでした。英数字のみ表示されます。")
     
     REPORTLAB_AVAILABLE = True
+    
 except ImportError:
     REPORTLAB_AVAILABLE = False
     # フォールバック変数
     JAPANESE_FONT = 'Helvetica'
     JAPANESE_FONT_BOLD = 'Helvetica-Bold'
-    JAPANESE_FONT_LIGHT = 'Helvetica'lab.pdfgen import canvas
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-    REPORTLAB_AVAILABLE = True
-except ImportError:
-    REPORTLAB_AVAILABLE = False
+    JAPANESE_FONT_LIGHT = 'Helvetica'
 
+# ロガー設定（ImportError時にも必要）
 logger = logging.getLogger(__name__)
 
 
@@ -210,7 +211,7 @@ class PDFReportGenerator:
             <b>使用フォント情報:</b><br/>
             • 通常フォント: {JAPANESE_FONT}<br/>
             • 太字フォント: {JAPANESE_FONT_BOLD}<br/>
-            • 軽量フォント: {JAPANESE_FONT_LIGHT if 'JAPANESE_FONT_LIGHT' in globals() else 'N/A'}<br/>
+            • 軽量フォント: {JAPANESE_FONT_LIGHT}<br/>
             """
             
             font_info_para = Paragraph(font_info_text, self.styles['CustomSmall'])
