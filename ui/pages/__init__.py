@@ -1,28 +1,10 @@
 # ui/pages/__init__.py
 """
-ページモジュール
+UI ページパッケージ
 
-各ページの描画ロジックを含むモジュール群です。
-各ページは独立したモジュールとして実装され、
-共通のインターフェースを持ちます。
+このファイルは現在空です。
+必要に応じて後でインポートを追加します。
 """
 
-from . import (
-    dashboard_page,
-    upload_page,
-    data_management_page,
-    hospital_page,
-    department_page,
-    surgeon_page,
-    prediction_page
-)
-
-__all__ = [
-    'dashboard_page',
-    'upload_page', 
-    'data_management_page',
-    'hospital_page',
-    'department_page',
-    'surgeon_page',
-    'prediction_page'
-]
+# 現在は何もインポートしません
+# 段階的にモジュールを追加していきます

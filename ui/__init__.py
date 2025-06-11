@@ -1,25 +1,11 @@
+
 # ui/__init__.py
 """
-UI関連モジュール
+UI パッケージ
 
-このパッケージには、Streamlitアプリケーションの
-UI描画に関する全ての機能が含まれています。
+このファイルは現在空です。
+必要に応じて後でインポートを追加します。
 """
 
-from . import (
-    session_manager,
-    sidebar,
-    page_router,
-    error_handler,
-    pages,
-    components
-)
-
-__all__ = [
-    'session_manager',
-    'sidebar', 
-    'page_router',
-    'error_handler',
-    'pages',
-    'components'
-]
+# 現在は何もインポートしません
+# 段階的にモジュールを追加していきます

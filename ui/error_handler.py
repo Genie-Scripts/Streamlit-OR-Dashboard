@@ -240,5 +240,8 @@ def setup_global_exception_handler():
     sys.excepthook = handle_exception
 
 
+# 便利な別名を追加
+with_error_handling = ErrorHandler.with_error_handling
+
 # 初期化
 setup_global_exception_handler()
