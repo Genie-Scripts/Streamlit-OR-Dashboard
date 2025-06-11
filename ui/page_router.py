@@ -26,23 +26,20 @@ class PageRouter:
         try:
             # 遅延インポートでページモジュールを読み込み
             from ui.pages.dashboard_page import DashboardPage
-            from ui.pages.upload_page import UploadPage
             from ui.pages.data_management_page import DataManagementPage
-            from ui.pages.hospital_page import HospitalPage
-            from ui.pages.department_page import DepartmentPage
-            from ui.pages.surgeon_page import SurgeonPage
-            from ui.pages.prediction_page import PredictionPage
             
-            # ページマッピング
+            # 一時的に利用可能なページのみ設定
             self._pages = {
                 "ダッシュボード": DashboardPage.render,
-                "データアップロード": UploadPage.render,
                 "データ管理": DataManagementPage.render,
-                "病院全体分析": HospitalPage.render,
-                "診療科別分析": DepartmentPage.render,
-                "術者分析": SurgeonPage.render,
-                "将来予測": PredictionPage.render,
             }
+            
+            # 他のページは一時的にフォールバック
+            fallback_pages = [
+                "データアップロード", "病院全体分析", "診療科別分析", "術者分析", "将来予測"
+            ]
+            for page in fallback_pages:
+                self._pages[page] = self._render_fallback_page
             
             logger.info(f"ページルート設定完了: {list(self._pages.keys())}")
             

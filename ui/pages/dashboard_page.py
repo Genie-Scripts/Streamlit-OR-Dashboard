@@ -11,8 +11,9 @@ import logging
 
 from ui.session_manager import SessionManager
 from ui.error_handler import safe_streamlit_operation, safe_data_operation
-from ui.components.kpi_display import KPIDisplay
-from ui.components.chart_container import ChartContainer
+# コンポーネントは一時的にコメントアウト
+# from ui.components.kpi_display import KPIDisplay
+# from ui.components.chart_container import ChartContainer
 
 # 既存の分析モジュールをインポート
 from analysis import weekly, ranking
@@ -107,8 +108,9 @@ class DashboardPage:
             # KPIサマリーを計算
             kpi_summary = ranking.get_kpi_summary(df, latest_date)
             
-            # KPIDisplayコンポーネントを使用
-            KPIDisplay.render_kpi_metrics(kpi_summary)
+            # 一時的に直接表示
+            # KPIDisplay.render_kpi_metrics(kpi_summary)
+            generic_plots.display_kpi_metrics(kpi_summary)
             
         except Exception as e:
             logger.error(f"KPI計算エラー: {e}")
@@ -136,6 +138,7 @@ class DashboardPage:
     @staticmethod
     @safe_data_operation("週次トレンド分析")
     def _render_weekly_trend(df: pd.DataFrame, target_dict: Dict[str, Any]) -> None:
+        """週次トレンドセクションを描画"""
         st.header("📈 病院全体 週次トレンド")
         
         # 🔍 強制デバッグ表示
@@ -143,7 +146,6 @@ class DashboardPage:
         st.write("**target_dict:**", target_dict)
         st.write("**target_dict type:**", type(target_dict))
         st.write("**target_dict length:**", len(target_dict) if target_dict else "None")
-        st.write("**target_dict keys:**", list(target_dict.keys()) if target_dict else "None")
         
         # SessionManagerから直接取得
         session_target = SessionManager.get_target_dict()
@@ -161,30 +163,24 @@ class DashboardPage:
             summary = weekly.get_summary(df, use_complete_weeks=use_complete_weeks)
             
             if not summary.empty:
-                st.write("**summary data:**", summary.head())
-                
-                # チャートを作成（ここで目標値が使われる）
+                # チャートを作成
                 fig = trend_plots.create_weekly_summary_chart(
                     summary, "病院全体 週次推移", target_dict
                 )
                 
-                # 🔍 figオブジェクトの詳細確認
-                st.write("**Chart data traces:**", len(fig.data))
-                for i, trace in enumerate(fig.data):
-                    st.write(f"Trace {i}: {trace.name}, y values: {trace.y[:5] if hasattr(trace, 'y') and trace.y is not None else 'None'}")
-                
-                # ChartContainerを使用して表示
-                ChartContainer.render_chart(
-                    fig, 
-                    title="週次推移チャート",
-                    help_text="病院全体の週次手術件数の推移を表示しています"
-                )
+                # 一時的に直接表示
+                # ChartContainer.render_chart(
+                #     fig, 
+                #     title="週次推移チャート",
+                #     help_text="病院全体の週次手術件数の推移を表示しています"
+                # )
+                st.plotly_chart(fig, use_container_width=True)
             else:
                 st.warning("週次トレンドデータがありません")
                 
         except Exception as e:
-            st.error(f"エラー: {e}")
-        logger.error(f"週次トレンド分析エラー: {e}")
+            logger.error(f"週次トレンド分析エラー: {e}")
+            st.error("週次トレンド分析中にエラーが発生しました")
     
     @staticmethod
     @safe_data_operation("ランキング分析")
@@ -224,12 +220,13 @@ class DashboardPage:
                 # ランキングチャートを作成
                 fig_rank = generic_plots.plot_achievement_ranking(ranking_data)
                 
-                # チャートを表示
-                ChartContainer.render_chart(
-                    fig_rank,
-                    title="診療科別達成率ランキング",
-                    help_text="直近12週間の目標達成率ランキングです"
-                )
+                # 一時的に直接表示
+                # ChartContainer.render_chart(
+                #     fig_rank,
+                #     title="診療科別達成率ランキング",
+                #     help_text="直近12週間の目標達成率ランキングです"
+                # )
+                st.plotly_chart(fig_rank, use_container_width=True)
                 
                 # 期間情報の表示
                 st.caption(
