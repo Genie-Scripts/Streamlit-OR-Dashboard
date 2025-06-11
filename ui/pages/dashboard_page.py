@@ -136,25 +136,19 @@ class DashboardPage:
     @staticmethod
     @safe_data_operation("週次トレンド分析")
     def _render_weekly_trend(df: pd.DataFrame, target_dict: Dict[str, Any]) -> None:
-        """週次トレンドセクションを描画"""
+        st.header("📈 病院全体 週次トレンド")
         
-        # 🔍 デバッグ: 目標値の詳細表示
-        with st.expander("🔍 目標値デバッグ情報", expanded=False):
-            st.subheader("target_dict の中身:")
-            st.json(target_dict)
-            
-            if target_dict:
-                st.subheader("診療科別目標値:")
-                for dept, target in target_dict.items():
-                    st.write(f"• {dept}: {target}")
-                
-                # 合計計算
-                total_target = sum(target_dict.values()) if target_dict else 0
-                st.write(f"**合計目標:** {total_target:.1f} 件/週")
-                st.write(f"**日割り目標:** {total_target/7:.1f} 件/日")
-            else:
-                st.write("目標データが設定されていません")
-
+        # 🔍 強制デバッグ表示
+        st.error("🔍 デバッグ情報（強制表示）")
+        st.write("**target_dict:**", target_dict)
+        st.write("**target_dict type:**", type(target_dict))
+        st.write("**target_dict length:**", len(target_dict) if target_dict else "None")
+        st.write("**target_dict keys:**", list(target_dict.keys()) if target_dict else "None")
+        
+        # SessionManagerから直接取得
+        session_target = SessionManager.get_target_dict()
+        st.write("**SessionManager target_dict:**", session_target)
+        
         # 完全週データオプション
         use_complete_weeks = st.toggle(
             "完全週データで分析", 
@@ -167,10 +161,17 @@ class DashboardPage:
             summary = weekly.get_summary(df, use_complete_weeks=use_complete_weeks)
             
             if not summary.empty:
-                # チャートを作成
+                st.write("**summary data:**", summary.head())
+                
+                # チャートを作成（ここで目標値が使われる）
                 fig = trend_plots.create_weekly_summary_chart(
                     summary, "病院全体 週次推移", target_dict
                 )
+                
+                # 🔍 figオブジェクトの詳細確認
+                st.write("**Chart data traces:**", len(fig.data))
+                for i, trace in enumerate(fig.data):
+                    st.write(f"Trace {i}: {trace.name}, y values: {trace.y[:5] if hasattr(trace, 'y') and trace.y is not None else 'None'}")
                 
                 # ChartContainerを使用して表示
                 ChartContainer.render_chart(
@@ -182,8 +183,8 @@ class DashboardPage:
                 st.warning("週次トレンドデータがありません")
                 
         except Exception as e:
-            logger.error(f"週次トレンド分析エラー: {e}")
-            st.error("週次トレンド分析中にエラーが発生しました")
+            st.error(f"エラー: {e}")
+        logger.error(f"週次トレンド分析エラー: {e}")
     
     @staticmethod
     @safe_data_operation("ランキング分析")
