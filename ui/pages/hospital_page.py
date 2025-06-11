@@ -104,6 +104,16 @@ class HospitalPage:
                 st.warning("週次推移データがありません。")
                 return
             
+            # DataFrameの構造確認
+            logger.info(f"Summary columns: {list(summary.columns)}")
+            logger.info(f"Summary shape: {summary.shape}")
+            
+            # 必要なカラムの存在確認
+            if '平日1日平均件数' not in summary.columns:
+                st.error("必要なデータ列（平日1日平均件数）が見つかりません。")
+                st.write("利用可能な列:", list(summary.columns))
+                return
+            
             # タブで複数パターンを表示
             tab1, tab2, tab3 = st.tabs(["📊 標準推移", "📈 移動平均", "🎯 目標比較"])
             
@@ -115,74 +125,97 @@ class HospitalPage:
             with tab2:
                 st.markdown("**移動平均トレンド（4週移動平均）**")
                 if len(summary) >= 4:
-                    summary_ma = summary.copy()
-                    summary_ma['4週移動平均'] = summary_ma['平日1日平均件数'].rolling(window=4).mean()
-                    
-                    # 移動平均チャートを既存関数で作成
-                    fig2 = trend_plots.create_weekly_summary_chart(
-                        summary_ma, "移動平均トレンド（4週移動平均）", target_dict
-                    )
-                    st.plotly_chart(fig2, use_container_width=True)
-                    
-                    # 移動平均の数値テーブル
-                    with st.expander("移動平均データ"):
-                        ma_display = summary_ma[['週開始日', '平日1日平均件数', '4週移動平均']].dropna()
-                        st.dataframe(ma_display.round(1), use_container_width=True)
+                    try:
+                        summary_ma = summary.copy()
+                        summary_ma['4週移動平均'] = summary_ma['平日1日平均件数'].rolling(window=4).mean()
+                        
+                        # 移動平均チャートを既存関数で作成
+                        fig2 = trend_plots.create_weekly_summary_chart(
+                            summary_ma, "移動平均トレンド（4週移動平均）", target_dict
+                        )
+                        st.plotly_chart(fig2, use_container_width=True)
+                        
+                        # 移動平均の数値テーブル
+                        with st.expander("移動平均データ"):
+                            try:
+                                # DataFrameをコピーしてインデックスをリセット
+                                ma_display = summary_ma[['平日1日平均件数', '4週移動平均']].dropna().reset_index()
+                                st.dataframe(ma_display.round(1), use_container_width=True)
+                            except Exception as e:
+                                st.write("移動平均データ:")
+                                st.dataframe(summary_ma[['平日1日平均件数', '4週移動平均']].dropna().round(1))
+                    except Exception as e:
+                        st.error(f"移動平均計算エラー: {e}")
+                        logger.error(f"移動平均計算エラー: {e}")
                 else:
                     st.info("移動平均計算には最低4週間のデータが必要です。")
             
             with tab3:
                 st.markdown("**目標達成率推移**")
                 if target_dict:
-                    from config.hospital_targets import HospitalTargets
-                    hospital_target = HospitalTargets.get_daily_target()
-                    
-                    summary_target = summary.copy()
-                    summary_target['達成率(%)'] = (summary_target['平日1日平均件数'] / hospital_target * 100)
-                    
-                    # 達成率チャートを既存関数で作成
-                    fig3 = trend_plots.create_weekly_summary_chart(
-                        summary_target, "目標達成率推移", target_dict
-                    )
-                    st.plotly_chart(fig3, use_container_width=True)
-                    
-                    # 達成率統計
-                    avg_achievement = summary_target['達成率(%)'].mean()
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("平均達成率", f"{avg_achievement:.1f}%")
-                    with col2:
-                        above_target = len(summary_target[summary_target['達成率(%)'] >= 100])
-                        st.metric("目標達成週数", f"{above_target}/{len(summary_target)}週")
-                    with col3:
-                        max_achievement = summary_target['達成率(%)'].max()
-                        st.metric("最高達成率", f"{max_achievement:.1f}%")
+                    try:
+                        from config.hospital_targets import HospitalTargets
+                        hospital_target = HospitalTargets.get_daily_target()
+                        
+                        summary_target = summary.copy()
+                        summary_target['達成率(%)'] = (summary_target['平日1日平均件数'] / hospital_target * 100)
+                        
+                        # 達成率チャートを既存関数で作成
+                        fig3 = trend_plots.create_weekly_summary_chart(
+                            summary_target, "目標達成率推移", target_dict
+                        )
+                        st.plotly_chart(fig3, use_container_width=True)
+                        
+                        # 達成率統計
+                        avg_achievement = summary_target['達成率(%)'].mean()
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("平均達成率", f"{avg_achievement:.1f}%")
+                        with col2:
+                            above_target = len(summary_target[summary_target['達成率(%)'] >= 100])
+                            st.metric("目標達成週数", f"{above_target}/{len(summary_target)}週")
+                        with col3:
+                            max_achievement = summary_target['達成率(%)'].max()
+                            st.metric("最高達成率", f"{max_achievement:.1f}%")
+                    except Exception as e:
+                        st.error(f"目標達成率計算エラー: {e}")
+                        logger.error(f"目標達成率計算エラー: {e}")
                 else:
                     st.info("目標データが設定されていません。")
             
             # 統計サマリー
             with st.expander("📊 統計サマリー"):
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric("🗓️ 分析週数", f"{len(summary)}週")
-                    st.metric("📈 最大値", f"{summary['平日1日平均件数'].max():.1f}件/日")
-                
-                with col2:
-                    st.metric("📉 最小値", f"{summary['平日1日平均件数'].min():.1f}件/日") 
-                    st.metric("📊 平均値", f"{summary['平日1日平均件数'].mean():.1f}件/日")
-                
-                with col3:
-                    if len(summary) >= 2:
-                        recent_avg = summary.tail(4)['平日1日平均件数'].mean()
-                        earlier_avg = summary.head(4)['平日1日平均件数'].mean()
-                        trend_change = ((recent_avg/earlier_avg - 1)*100) if earlier_avg > 0 else 0
-                        st.metric("📈 トレンド変化", f"{trend_change:+.1f}%")
+                try:
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("🗓️ 分析週数", f"{len(summary)}週")
+                        st.metric("📈 最大値", f"{summary['平日1日平均件数'].max():.1f}件/日")
+                    
+                    with col2:
+                        st.metric("📉 最小値", f"{summary['平日1日平均件数'].min():.1f}件/日") 
+                        st.metric("📊 平均値", f"{summary['平日1日平均件数'].mean():.1f}件/日")
+                    
+                    with col3:
+                        if len(summary) >= 8:  # 十分なデータがある場合のみ
+                            recent_avg = summary.tail(4)['平日1日平均件数'].mean()
+                            earlier_avg = summary.head(4)['平日1日平均件数'].mean()
+                            trend_change = ((recent_avg/earlier_avg - 1)*100) if earlier_avg > 0 else 0
+                            st.metric("📈 トレンド変化", f"{trend_change:+.1f}%")
                         st.metric("🔄 標準偏差", f"{summary['平日1日平均件数'].std():.1f}")
+                except Exception as e:
+                    st.write("統計計算中にエラーが発生しました")
+                    logger.error(f"統計サマリーエラー: {e}")
                 
         except Exception as e:
             st.error(f"週次推移分析エラー: {e}")
             logger.error(f"週次推移分析エラー: {e}")
+            # デバッグ情報を表示
+            if not summary.empty:
+                st.write("デバッグ情報:")
+                st.write(f"DataFrameの形状: {summary.shape}")
+                st.write(f"利用可能な列: {list(summary.columns)}")
+                st.dataframe(summary.head())
     
     @staticmethod
     @safe_data_operation("統計分析表示")
