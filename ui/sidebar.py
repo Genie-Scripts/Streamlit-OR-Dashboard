@@ -130,16 +130,24 @@ class SidebarManager:
         # 現在のビューを取得
         current_view = SessionManager.get_current_view()
         
-        # ラジオボタンでビュー選択
+        # ラジオボタンでビュー選択（key設定を改善）
+        try:
+            current_index = SidebarManager.NAVIGATION_VIEWS.index(current_view)
+        except ValueError:
+            current_index = 0  # デフォルトはダッシュボード
+        
         selected_view = st.radio(
             "ページ選択",
             SidebarManager.NAVIGATION_VIEWS,
-            index=SidebarManager.NAVIGATION_VIEWS.index(current_view) if current_view in SidebarManager.NAVIGATION_VIEWS else 0,
-            key="navigation"
+            index=current_index,
+            key="navigation_radio",  # 一意のキー名
+            help="分析ページを選択してください"
         )
         
-        # セッションに保存
-        SessionManager.set_current_view(selected_view)
+        # ビューが変更された場合のみセッションを更新
+        if selected_view != current_view:
+            SessionManager.set_current_view(selected_view)
+            st.rerun()  # 即座に再描画
         
         # データが必要なページでデータ未読み込みの場合の警告
         data_required_views = [

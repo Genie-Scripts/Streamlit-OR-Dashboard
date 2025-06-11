@@ -92,9 +92,6 @@ class SurgeonPage:
             surgeon_summary = surgeon.get_surgeon_summary(target_df)
             
             if not surgeon_summary.empty:
-                # デバッグ: 列名を確認
-                st.write(f"🔍 デバッグ: 術者サマリーの列名: {surgeon_summary.columns.tolist()}")
-                
                 # ランキンググラフ
                 fig = generic_plots.plot_surgeon_ranking(surgeon_summary, top_n, selected_dept)
                 st.plotly_chart(fig, use_container_width=True)
