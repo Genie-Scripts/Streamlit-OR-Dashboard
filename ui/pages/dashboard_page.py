@@ -12,9 +12,6 @@ from datetime import datetime
 
 from ui.session_manager import SessionManager
 from ui.error_handler import safe_streamlit_operation, safe_data_operation
-# コンポーネントは一時的にコメントアウト
-# from ui.components.kpi_display import KPIDisplay
-# from ui.components.chart_container import ChartContainer
 
 # 既存の分析モジュールをインポート
 from analysis import weekly, ranking
@@ -251,45 +248,6 @@ class DashboardPage:
                 weekdays = sum(1 for i in range(total_days) 
                              if (start_date + pd.Timedelta(days=i)).weekday() < 5)
             else:
-                weekdays = 1  # ゼロ除算回避
-            
-            # 平日のみの件数
-            weekday_df = gas_df[gas_df['is_weekday'] == True] if 'is_weekday' in gas_df.columns else gas_df
-            weekday_cases = len(weekday_df)
-            
-            daily_avg = weekday_cases / weekdays if weekdays > 0 else 0
-            
-            # 診療科数
-            dept_count = len(gas_df['実施診療科'].dropna().unique()) if '実施診療科' in gas_df.columns else 0
-            
-            # 目標達成率
-            from config.hospital_targets import HospitalTargets
-            hospital_target = HospitalTargets.get_daily_target()
-            achievement_rate = (daily_avg / hospital_target * 100) if hospital_target > 0 else 0
-            
-    @staticmethod
-    def _calculate_period_kpi(df: pd.DataFrame, start_date: Optional[pd.Timestamp], 
-                             end_date: Optional[pd.Timestamp]) -> Dict[str, Any]:
-        """選択期間のKPIを計算"""
-        try:
-            if df.empty:
-                return {}
-            
-            # 全身麻酔手術のみ
-            gas_df = df[df['is_gas_20min'] == True] if 'is_gas_20min' in df.columns else df
-            
-            if gas_df.empty:
-                return {}
-            
-            # 基本指標
-            total_cases = len(gas_df)
-            
-            # 期間の日数計算
-            if start_date and end_date:
-                total_days = (end_date - start_date).days + 1
-                weekdays = sum(1 for i in range(total_days) 
-                             if (start_date + pd.Timedelta(days=i)).weekday() < 5)
-            else:
                 total_days = 28  # デフォルト4週間
                 weekdays = 20   # デフォルト平日数
             
@@ -349,7 +307,6 @@ class DashboardPage:
         
         with col3:
             achievement = kpi_data.get('achievement_rate', 0)
-            delta_color = "normal" if achievement >= 100 else "off" if achievement < 80 else "normal"
             st.metric(
                 "🎯 目標達成率",
                 f"{achievement:.1f}%",
