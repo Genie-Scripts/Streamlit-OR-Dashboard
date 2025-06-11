@@ -213,14 +213,16 @@ class DashboardPage:
                     (df['手術実施日_dt'] <= end_date)
                 ]
             else:
-                # フォールバック: 直近4週
-                period_df = df
+                # フォールバック: 元の関数を使用
+                kpi_summary = ranking.get_kpi_summary(df, latest_date)
+                generic_plots.display_kpi_metrics(kpi_summary)
+                return
             
             # KPIサマリーを計算（選択期間用）
-            kpi_summary = DashboardPage._calculate_period_kpi(period_df, start_date, end_date)
+            kpi_data = DashboardPage._calculate_period_kpi(period_df, start_date, end_date)
             
-            # KPI表示
-            generic_plots.display_kpi_metrics(kpi_summary)
+            # KPI表示（直接メトリクス表示）
+            DashboardPage._display_period_kpi_metrics(kpi_data, start_date, end_date)
             
         except Exception as e:
             logger.error(f"KPI計算エラー: {e}")
@@ -265,18 +267,113 @@ class DashboardPage:
             hospital_target = HospitalTargets.get_daily_target()
             achievement_rate = (daily_avg / hospital_target * 100) if hospital_target > 0 else 0
             
+    @staticmethod
+    def _calculate_period_kpi(df: pd.DataFrame, start_date: Optional[pd.Timestamp], 
+                             end_date: Optional[pd.Timestamp]) -> Dict[str, Any]:
+        """選択期間のKPIを計算"""
+        try:
+            if df.empty:
+                return {}
+            
+            # 全身麻酔手術のみ
+            gas_df = df[df['is_gas_20min'] == True] if 'is_gas_20min' in df.columns else df
+            
+            if gas_df.empty:
+                return {}
+            
+            # 基本指標
+            total_cases = len(gas_df)
+            
+            # 期間の日数計算
+            if start_date and end_date:
+                total_days = (end_date - start_date).days + 1
+                weekdays = sum(1 for i in range(total_days) 
+                             if (start_date + pd.Timedelta(days=i)).weekday() < 5)
+            else:
+                total_days = 28  # デフォルト4週間
+                weekdays = 20   # デフォルト平日数
+            
+            # 平日のみの件数
+            weekday_df = gas_df[gas_df['is_weekday'] == True] if 'is_weekday' in gas_df.columns else gas_df
+            weekday_cases = len(weekday_df)
+            
+            daily_avg = weekday_cases / weekdays if weekdays > 0 else 0
+            
+            # 診療科数
+            dept_count = len(gas_df['実施診療科'].dropna().unique()) if '実施診療科' in gas_df.columns else 0
+            
+            # 目標達成率
+            from config.hospital_targets import HospitalTargets
+            hospital_target = HospitalTargets.get_daily_target()
+            achievement_rate = (daily_avg / hospital_target * 100) if hospital_target > 0 else 0
+            
             return {
                 'total_cases': total_cases,
                 'daily_average': daily_avg,
                 'achievement_rate': achievement_rate,
                 'department_count': dept_count,
-                'period_days': total_days if start_date and end_date else 0,
+                'period_days': total_days,
                 'weekdays': weekdays
             }
             
         except Exception as e:
             logger.error(f"期間KPI計算エラー: {e}")
             return {}
+    
+    @staticmethod
+    def _display_period_kpi_metrics(kpi_data: Dict[str, Any], 
+                                   start_date: Optional[pd.Timestamp], 
+                                   end_date: Optional[pd.Timestamp]) -> None:
+        """選択期間のKPI指標を表示"""
+        if not kpi_data:
+            st.warning("KPIデータが計算できませんでした")
+            return
+        
+        # メトリクス表示
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "📊 総手術件数",
+                f"{kpi_data.get('total_cases', 0):,}件",
+                help="選択期間内の全身麻酔手術総件数"
+            )
+        
+        with col2:
+            daily_avg = kpi_data.get('daily_average', 0)
+            st.metric(
+                "📈 平日平均件数",
+                f"{daily_avg:.1f}件/日",
+                help="平日（月〜金）の1日あたり平均手術件数"
+            )
+        
+        with col3:
+            achievement = kpi_data.get('achievement_rate', 0)
+            delta_color = "normal" if achievement >= 100 else "off" if achievement < 80 else "normal"
+            st.metric(
+                "🎯 目標達成率",
+                f"{achievement:.1f}%",
+                delta=f"{achievement - 100:+.1f}%" if achievement != 100 else "目標達成！",
+                help="病院全体の目標に対する達成率"
+            )
+        
+        with col4:
+            dept_count = kpi_data.get('department_count', 0)
+            st.metric(
+                "🏥 活動診療科数",
+                f"{dept_count}科",
+                help="期間内に手術実績のある診療科数"
+            )
+        
+        # 補足情報
+        if start_date and end_date:
+            period_days = kpi_data.get('period_days', 0)
+            weekdays = kpi_data.get('weekdays', 0)
+            
+            st.caption(
+                f"📅 分析期間: {start_date.strftime('%Y/%m/%d')} ～ {end_date.strftime('%Y/%m/%d')} "
+                f"({period_days}日間, 平日{weekdays}日)"
+            )
     
     @staticmethod
     def _render_analysis_period_info(latest_date: Optional[pd.Timestamp], 
