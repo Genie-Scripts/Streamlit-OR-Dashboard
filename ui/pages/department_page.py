@@ -83,8 +83,7 @@ class DepartmentPage:
             summary = weekly.get_summary(dept_full_df, use_complete_weeks=use_complete_weeks)
             
             if not summary.empty:
-                # --- ▼ここからがエラー修正箇所▼ ---
-                # '週' という名前の列を直接使用してフィルタリングする
+                # --- ▼ここからが最終修正箇所▼ ---
                 date_col = '週'
                 if date_col not in summary.columns:
                     st.error(f"週次サマリーに日付情報列 '{date_col}' が見つかりません。"); return
@@ -100,12 +99,12 @@ class DepartmentPage:
                 if period_summary.empty:
                     st.warning("選択期間内に表示できる週次データがありません。"); return
                 
-                period_summary = period_summary.set_index(date_col)
+                period_summary_for_plotting = period_summary.set_index(date_col)
 
-                fig = trend_plots.create_weekly_dept_chart(period_summary, dept_name, target_dict)
+                fig = trend_plots.create_weekly_dept_chart(period_summary_for_plotting, dept_name, target_dict)
                 st.plotly_chart(fig, use_container_width=True)
                 with st.expander("📊 統計サマリー (選択期間)"):
-                    st.dataframe(period_summary.describe().transpose().round(2))
+                    st.dataframe(period_summary_for_plotting.describe().transpose().round(2))
             else:
                 st.warning(f"{dept_name}の週次データがありません")
         except Exception as e:

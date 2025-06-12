@@ -7,15 +7,21 @@
 import streamlit as st
 import pandas as pd
 from typing import Dict, Any, Optional
-from io import StringIO
 import logging
 
 from ui.session_manager import SessionManager
 from ui.error_handler import safe_streamlit_operation, safe_data_operation
 from ui.components.period_selector import PeriodSelector
 
-from analysis import weekly
-from plotting import trend_plots
+from analysis import weekly, ranking
+from plotting import trend_plots, generic_plots
+
+try:
+    from sklearn.linear_model import LinearRegression
+    import numpy as np
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -29,84 +35,146 @@ class HospitalPage:
         st.title("🏥 病院全体分析 - 詳細分析")
 
         df = SessionManager.get_processed_df()
-        if df.empty:
-            st.warning("分析するデータがありません。")
-            return
+        target_dict = SessionManager.get_target_dict()
 
-        # --- ▼最重要デバッグコード▼ ---
-        # weekly.get_summaryの戻り値を直接確認します
-        st.markdown("---")
-        st.subheader("🐞【最重要デバッグ情報】🐞")
-        st.write("`weekly.get_summary()` が返した生の `summary` データフレームの構造です。")
-        st.write("お手数ですが、この枠内の情報をすべてコピーしてご提供ください。")
-        
-        try:
-            summary_for_debug = weekly.get_summary(df, use_complete_weeks=True)
-            if not summary_for_debug.empty:
-                st.write("**1. データフレームの先頭5行 (`summary.head()`):**")
-                st.dataframe(summary_for_debug.head())
+        PeriodSelector.render()
+        start_date = SessionManager.get_start_date()
+        end_date = SessionManager.get_end_date()
 
-                st.write("**2. データフレームのインデックス (`summary.index`):**")
-                st.write(summary_for_debug.index)
+        if not all([start_date, end_date]):
+            st.error("分析期間が正しく設定されていません。"); return
 
-                st.write("**3. データフレームのカラム一覧 (`summary.columns`):**")
-                st.write(summary_for_debug.columns.to_list())
+        period_df = df[(df['手術実施日_dt'] >= start_date) & (df['手術実施日_dt'] <= end_date)]
 
-                buffer = StringIO()
-                summary_for_debug.info(buf=buffer)
-                s = buffer.getvalue()
-                st.write("**4. データフレーム情報 (`summary.info()`):**")
-                st.text(s)
-            else:
-                st.warning("デバッグ用の週次サマリーデータが空です。")
-        except Exception as e:
-            st.error(f"デバッグ情報生成中にエラーが発生しました: {e}")
-        
-        st.markdown("---", help="デバッグはここまで")
-        # --- ▲最重要デバッグコード▲ ---
-        
-        # 期間選択と後続の処理（エラーが出てもデバッグ情報は表示されるように）
-        try:
-            target_dict = SessionManager.get_target_dict()
-            PeriodSelector.render()
-            start_date = SessionManager.get_start_date()
-            end_date = SessionManager.get_end_date()
-
-            if not all([start_date, end_date]):
-                st.error("分析期間が正しく設定されていません。"); return
-
-            period_df = df[(df['手術実施日_dt'] >= start_date) & (df['手術実施日_dt'] <= end_date)]
-            full_summary = weekly.get_summary(df, use_complete_weeks=True)
-            
-            # デバッグ情報表示後は、エラーが出てもアプリが停止しないようにする
-            if not full_summary.empty:
-                HospitalPage._render_multiple_trend_patterns(full_summary, target_dict, start_date, end_date)
-            
-            HospitalPage._render_statistical_analysis(period_df)
-            HospitalPage._render_breakdown_analysis(period_df)
-
-        except Exception as e:
-             st.error(f"ページ描画中にエラーが発生しました: {e}")
-
+        full_summary = weekly.get_summary(df, use_complete_weeks=True)
+        HospitalPage._render_multiple_trend_patterns(full_summary, target_dict, start_date, end_date)
+        HospitalPage._render_statistical_analysis(period_df)
+        HospitalPage._render_breakdown_analysis(period_df)
 
     @staticmethod
     @safe_data_operation("複数トレンドパターン表示")
     def _render_multiple_trend_patterns(summary: pd.DataFrame, target_dict: Dict[str, Any], start_date: pd.Timestamp, end_date: pd.Timestamp) -> None:
         st.subheader("📈 週次推移分析（複数パターン）")
-        
-        # ★★★ ここに以前の修正コードがありますが、一旦デバッグ情報取得を優先します ★★★
-        st.info("現在、根本原因調査のためグラフ表示を一時停止しています。上記のデバッグ情報をご提供ください。")
-        
+        try:
+            if summary.empty:
+                st.warning("週次推移データがありません。"); return
 
-    # (以降のメソッドは修正の影響を受けないため、簡略化のため省略)
+            # --- ▼ここからが最終修正箇所▼ ---
+            date_col = '週'
+            if date_col not in summary.columns:
+                st.error(f"週次サマリーに日付情報列 '{date_col}' が見つかりません。"); return
+
+            # 念のためデータ型をdatetimeに変換
+            summary[date_col] = pd.to_datetime(summary[date_col])
+            
+            # '週'列を使って期間でフィルタリング
+            period_summary = summary[
+                (summary[date_col] >= start_date) & 
+                (summary[date_col] <= end_date)
+            ].copy()
+            # --- ▲ここまで▲ ---
+            
+            if period_summary.empty:
+                st.warning("選択期間内の週次データがありません。"); return
+            
+            # グラフ描画のために日付列をインデックスに設定
+            period_summary_for_plotting = period_summary.set_index(date_col)
+
+            tab1, tab2, tab3 = st.tabs(["📊 標準推移", "📈 移動平均", "🎯 目標比較"])
+            with tab1:
+                st.markdown("**標準的な週次推移（平日1日平均）**")
+                fig1 = trend_plots.create_weekly_summary_chart(period_summary_for_plotting, "病院全体 週次推移", target_dict)
+                st.plotly_chart(fig1, use_container_width=True)
+            with tab2:
+                st.markdown("**移動平均トレンド（4週移動平均）**")
+                if len(period_summary_for_plotting) >= 4:
+                    summary_ma = period_summary_for_plotting.copy()
+                    summary_ma['4週移動平均'] = summary_ma['平日1日平均件数'].rolling(window=4).mean()
+                    fig2 = trend_plots.create_weekly_summary_chart(summary_ma, "移動平均トレンド", target_dict)
+                    st.plotly_chart(fig2, use_container_width=True)
+                else:
+                    st.info("移動平均計算には選択期間内に最低4週間のデータが必要です。")
+            with tab3:
+                st.markdown("**目標達成率推移**")
+                if target_dict:
+                    from config.hospital_targets import HospitalTargets
+                    hospital_target = HospitalTargets.get_daily_target()
+                    summary_target = period_summary_for_plotting.copy()
+                    summary_target['達成率(%)'] = (summary_target['平日1日平均件数'] / hospital_target * 100)
+                    fig3 = trend_plots.create_weekly_summary_chart(summary_target, "目標達成率推移", target_dict)
+                    st.plotly_chart(fig3, use_container_width=True)
+                else:
+                    st.info("目標データが設定されていません。")
+        except Exception as e:
+            st.error(f"週次推移分析エラー: {e}"); logger.error(f"週次推移分析エラー: {e}")
+
     @staticmethod
+    @safe_data_operation("統計分析表示")
     def _render_statistical_analysis(period_df: pd.DataFrame) -> None:
-        pass
+        st.markdown("---"); st.subheader("📊 統計分析・パフォーマンス指標")
+        try:
+            if period_df.empty: st.warning("選択期間内に分析対象データがありません。"); return
+            gas_df = period_df[period_df['is_gas_20min'] == True]
+            if gas_df.empty: st.warning("選択期間内に全身麻酔のデータがありません。"); return
+            st.markdown("**🏥 診療科別統計分析**")
+            dept_stats = HospitalPage._calculate_department_statistics(gas_df)
+            if not dept_stats.empty:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**上位5診療科 (件数)**"); st.dataframe(dept_stats.head().round(1), use_container_width=True)
+                with col2:
+                    st.markdown("**統計サマリー**")
+                    st.write(f"• 診療科数: {len(dept_stats)}科")
+                    st.write(f"• 平均件数/科: {dept_stats['合計件数'].mean():.1f}件")
+            if SKLEARN_AVAILABLE:
+                HospitalPage._render_advanced_statistics(gas_df)
+        except Exception as e:
+            st.error(f"統計分析エラー: {e}"); logger.error(f"統計分析エラー: {e}")
 
     @staticmethod
-    def _render_breakdown_analysis(period_df: pd.DataFrame) -> None:
-        pass
+    def _calculate_department_statistics(df: pd.DataFrame) -> pd.DataFrame:
+        try:
+            dept_stats = df.groupby('実施診療科').agg({'手術実施日_dt': 'count', 'is_weekday': 'sum'}).rename(columns={'手術実施日_dt': '合計件数', 'is_weekday': '平日件数'})
+            dept_stats['平日割合(%)'] = (dept_stats['平日件数'] / dept_stats['合計件数'] * 100).round(1)
+            return dept_stats.sort_values('合計件数', ascending=False)
+        except Exception as e:
+            logger.error(f"診療科別統計計算エラー: {e}"); return pd.DataFrame()
 
+    @staticmethod
+    def _render_advanced_statistics(df: pd.DataFrame) -> None:
+        st.markdown("**🔬 高度統計分析**")
+        daily_counts = df.groupby('手術実施日_dt').size().reset_index(name='件数').sort_values('手術実施日_dt')
+        if len(daily_counts) >= 7:
+            X = np.arange(len(daily_counts)).reshape(-1, 1); y = daily_counts['件数'].values
+            model = LinearRegression().fit(X, y)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("📈 トレンド傾向", "上昇" if model.coef_[0] > 0 else "下降")
+            col2.metric("📊 回帰係数", f"{model.coef_[0]:.3f}")
+            col3.metric("🎯 決定係数 (R²)", f"{model.score(X, y):.3f}")
+        else:
+            st.info("高度統計分析には最低7日分のデータが必要です。")
+
+    @staticmethod
+    @safe_data_operation("内訳分析表示")
+    def _render_breakdown_analysis(period_df: pd.DataFrame) -> None:
+        st.markdown("---"); st.subheader("🍰 内訳分析")
+        try:
+            if period_df.empty: st.warning("選択期間内にデータがありません。"); return
+            gas_df = period_df[period_df['is_gas_20min'] == True]
+            if gas_df.empty: st.warning("選択期間内に全身麻酔のデータがありません。"); return
+            tab1, tab2 = st.tabs(["曜日別", "手術室別"])
+            with tab1:
+                st.markdown("**曜日別 手術件数**")
+                dow_analysis = gas_df['手術実施日_dt'].dt.day_name().value_counts().reindex(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']).dropna()
+                st.bar_chart(dow_analysis)
+            with tab2:
+                st.markdown("**手術室別 手術件数 (上位10)**")
+                if '手術室' in gas_df.columns:
+                    st.bar_chart(gas_df['手術室'].value_counts().head(10))
+                else:
+                    st.info("「手術室」列がデータにありません。")
+        except Exception as e:
+            st.error(f"内訳分析エラー: {e}"); logger.error(f"内訳分析エラー: {e}")
 
 def render():
     HospitalPage.render()
