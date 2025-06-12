@@ -14,7 +14,6 @@ from ui.session_manager import SessionManager
 from ui.error_handler import safe_streamlit_operation, safe_data_operation
 from ui.components.period_selector import PeriodSelector
 
-# 既存の分析モジュールをインポート
 from analysis import weekly, ranking, surgeon
 from plotting import trend_plots, generic_plots
 
@@ -27,9 +26,7 @@ class DepartmentPage:
     @staticmethod
     @safe_streamlit_operation("診療科別分析ページ描画")
     def render() -> None:
-        """診療科別分析ページを描画"""
         st.title("🩺 診療科別分析")
-
         df = SessionManager.get_processed_df()
         target_dict = SessionManager.get_target_dict()
 
@@ -46,7 +43,6 @@ class DepartmentPage:
         if not selected_dept: return
 
         dept_period_df = period_df[period_df['実施診療科'] == selected_dept]
-        
         DepartmentPage._render_department_kpi(dept_period_df, selected_dept)
         
         dept_full_df = df[df['実施診療科'] == selected_dept]
@@ -55,7 +51,6 @@ class DepartmentPage:
 
     @staticmethod
     def _render_department_selector(df: pd.DataFrame) -> Optional[str]:
-        """診療科選択UI"""
         departments = sorted(df["実施診療科"].dropna().unique())
         if not departments:
             st.warning("データに診療科情報がありません。"); return None
@@ -64,7 +59,6 @@ class DepartmentPage:
     @staticmethod
     @safe_data_operation("診療科KPI計算")
     def _render_department_kpi(dept_period_df: pd.DataFrame, dept_name: str) -> None:
-        """診療科別KPI表示"""
         st.markdown("---"); st.subheader(f"📊 {dept_name} の主要指標")
         try:
             if dept_period_df.empty:
@@ -83,7 +77,6 @@ class DepartmentPage:
     @staticmethod
     @safe_data_operation("診療科別週次推移表示")
     def _render_department_trend(dept_full_df: pd.DataFrame, target_dict: Dict[str, Any], dept_name: str, start_date: pd.Timestamp, end_date: pd.Timestamp) -> None:
-        """診療科別週次推移表示"""
         st.markdown("---"); st.subheader(f"📈 {dept_name} 週次推移")
         try:
             use_complete_weeks = st.toggle("完全週データで分析", True, help="週の途中のデータを除外し、完全な週単位で分析します")
@@ -91,26 +84,24 @@ class DepartmentPage:
             
             if not summary.empty:
                 # --- ▼ここからがエラー修正箇所▼ ---
-                summary_with_date_col = summary.reset_index()
-                # CORRECT: 日付列 '週' を使用
+                # '週' という名前の列を直接使用してフィルタリングする
                 date_col = '週'
-                
-                if date_col not in summary_with_date_col.columns:
+                if date_col not in summary.columns:
                     st.error(f"週次サマリーに日付情報列 '{date_col}' が見つかりません。"); return
 
-                summary_with_date_col[date_col] = pd.to_datetime(summary_with_date_col[date_col])
-
-                period_summary_df = summary_with_date_col[
-                    (summary_with_date_col[date_col] >= start_date) & 
-                    (summary_with_date_col[date_col] <= end_date)
-                ]
-
-                period_summary = period_summary_df.set_index(date_col)
+                summary[date_col] = pd.to_datetime(summary[date_col])
+                
+                period_summary = summary[
+                    (summary[date_col] >= start_date) & 
+                    (summary[date_col] <= end_date)
+                ].copy()
                 # --- ▲ここまで▲ ---
                 
                 if period_summary.empty:
                     st.warning("選択期間内に表示できる週次データがありません。"); return
                 
+                period_summary = period_summary.set_index(date_col)
+
                 fig = trend_plots.create_weekly_dept_chart(period_summary, dept_name, target_dict)
                 st.plotly_chart(fig, use_container_width=True)
                 with st.expander("📊 統計サマリー (選択期間)"):
@@ -122,7 +113,6 @@ class DepartmentPage:
 
     @staticmethod
     def _render_detailed_analysis_tabs(dept_period_df: pd.DataFrame, dept_name: str) -> None:
-        """詳細分析タブを表示"""
         st.markdown("---"); st.header("🔍 詳細分析 (選択期間)")
         if dept_period_df.empty:
             st.warning("選択期間内に詳細分析を行うデータがありません。"); return
@@ -137,7 +127,6 @@ class DepartmentPage:
     @staticmethod
     @safe_data_operation("術者分析")
     def _render_surgeon_analysis_tab(dept_period_df: pd.DataFrame, dept_name: str) -> None:
-        """術者分析タブ"""
         st.subheader(f"{dept_name} 術者別件数 (Top 15)")
         with st.spinner("術者データを準備中..."):
             expanded_df = surgeon.get_expanded_surgeon_df(dept_period_df)
@@ -150,7 +139,6 @@ class DepartmentPage:
     @staticmethod
     @safe_data_operation("時間分析")
     def _render_time_analysis_tab(dept_period_df: pd.DataFrame) -> None:
-        """時間分析タブ"""
         st.subheader("曜日・月別 分布")
         gas_df = dept_period_df[dept_period_df['is_gas_20min']]
         if not gas_df.empty:
@@ -166,13 +154,10 @@ class DepartmentPage:
 
     @staticmethod
     def _render_statistics_tab(dept_period_df: pd.DataFrame) -> None:
-        """統計情報タブ"""
         st.subheader("基本統計")
         gas_df = dept_period_df[dept_period_df['is_gas_20min']]
         if not gas_df.empty:
             st.dataframe(gas_df.describe(include='all').transpose().astype(str), use_container_width=True)
 
-# ページルーター用の関数
 def render():
-    """ページルーター用のレンダー関数"""
     DepartmentPage.render()
