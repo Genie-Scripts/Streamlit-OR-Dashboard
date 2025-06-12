@@ -84,22 +84,32 @@ class DepartmentPage:
             
             if not summary.empty:
                 # --- ▼ここからが最終修正箇所▼ ---
-                date_col = '週'
-                if date_col not in summary.columns:
-                    st.error(f"週次サマリーに日付情報列 '{date_col}' が見つかりません。"); return
+                date_col = None
+                summary_for_filter = summary.copy()
 
-                summary[date_col] = pd.to_datetime(summary[date_col])
+                if pd.api.types.is_datetime64_any_dtype(summary_for_filter.index):
+                    summary_for_filter.index.name = '週'
+                    summary_with_date_col = summary_for_filter.reset_index()
+                    date_col = '週'
+                else:
+                    for col in summary_for_filter.columns:
+                        if pd.api.types.is_datetime64_any_dtype(summary_for_filter[col]):
+                            date_col = col; break
+                    summary_with_date_col = summary_for_filter
                 
-                period_summary = summary[
-                    (summary[date_col] >= start_date) & 
-                    (summary[date_col] <= end_date)
-                ].copy()
+                if date_col is None:
+                    st.error("週次サマリーに日付情報が見つかりませんでした。"); return
+
+                period_summary_df = summary_with_date_col[
+                    (summary_with_date_col[date_col] >= start_date) & 
+                    (summary_with_date_col[date_col] <= end_date)
+                ]
                 # --- ▲ここまで▲ ---
                 
-                if period_summary.empty:
+                if period_summary_df.empty:
                     st.warning("選択期間内に表示できる週次データがありません。"); return
                 
-                period_summary_for_plotting = period_summary.set_index(date_col)
+                period_summary_for_plotting = period_summary_df.set_index(date_col)
 
                 fig = trend_plots.create_weekly_dept_chart(period_summary_for_plotting, dept_name, target_dict)
                 st.plotly_chart(fig, use_container_width=True)

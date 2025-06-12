@@ -33,7 +33,6 @@ class HospitalPage:
     @safe_streamlit_operation("病院全体分析ページ描画")
     def render() -> None:
         st.title("🏥 病院全体分析 - 詳細分析")
-
         df = SessionManager.get_processed_df()
         target_dict = SessionManager.get_target_dict()
 
@@ -45,8 +44,8 @@ class HospitalPage:
             st.error("分析期間が正しく設定されていません。"); return
 
         period_df = df[(df['手術実施日_dt'] >= start_date) & (df['手術実施日_dt'] <= end_date)]
-
         full_summary = weekly.get_summary(df, use_complete_weeks=True)
+
         HospitalPage._render_multiple_trend_patterns(full_summary, target_dict, start_date, end_date)
         HospitalPage._render_statistical_analysis(period_df)
         HospitalPage._render_breakdown_analysis(period_df)
@@ -60,27 +59,39 @@ class HospitalPage:
                 st.warning("週次推移データがありません。"); return
 
             # --- ▼ここからが最終修正箇所▼ ---
-            date_col = '週'
-            if date_col not in summary.columns:
-                st.error(f"週次サマリーに日付情報列 '{date_col}' が見つかりません。"); return
+            # 堅牢な日付列の特定とフィルタリング
+            date_col = None
+            summary_for_filter = summary.copy()
 
-            # 念のためデータ型をdatetimeに変換
-            summary[date_col] = pd.to_datetime(summary[date_col])
-            
-            # '週'列を使って期間でフィルタリング
-            period_summary = summary[
-                (summary[date_col] >= start_date) & 
-                (summary[date_col] <= end_date)
-            ].copy()
+            # 1. インデックスが日付型かチェック
+            if pd.api.types.is_datetime64_any_dtype(summary_for_filter.index):
+                summary_for_filter.index.name = '週' # 念のため名前を統一
+                summary_with_date_col = summary_for_filter.reset_index()
+                date_col = '週'
+            else:
+                # 2. インデックスが日付でなければ、列から日付型を探す
+                for col in summary_for_filter.columns:
+                    if pd.api.types.is_datetime64_any_dtype(summary_for_filter[col]):
+                        date_col = col
+                        break
+                summary_with_date_col = summary_for_filter
+
+            if date_col is None:
+                st.error("週次サマリーに日付情報が見つかりませんでした。"); return
+
+            period_summary_df = summary_with_date_col[
+                (summary_with_date_col[date_col] >= start_date) & 
+                (summary_with_date_col[date_col] <= end_date)
+            ]
             # --- ▲ここまで▲ ---
             
-            if period_summary.empty:
+            if period_summary_df.empty:
                 st.warning("選択期間内の週次データがありません。"); return
             
-            # グラフ描画のために日付列をインデックスに設定
-            period_summary_for_plotting = period_summary.set_index(date_col)
+            period_summary_for_plotting = period_summary_df.set_index(date_col)
 
             tab1, tab2, tab3 = st.tabs(["📊 標準推移", "📈 移動平均", "🎯 目標比較"])
+            # (以降のタブ内ロジックは変更なし)
             with tab1:
                 st.markdown("**標準的な週次推移（平日1日平均）**")
                 fig1 = trend_plots.create_weekly_summary_chart(period_summary_for_plotting, "病院全体 週次推移", target_dict)
@@ -108,6 +119,7 @@ class HospitalPage:
         except Exception as e:
             st.error(f"週次推移分析エラー: {e}"); logger.error(f"週次推移分析エラー: {e}")
 
+    # (以降のメソッドは変更なし)
     @staticmethod
     @safe_data_operation("統計分析表示")
     def _render_statistical_analysis(period_df: pd.DataFrame) -> None:
