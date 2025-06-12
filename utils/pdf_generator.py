@@ -574,6 +574,7 @@ class PDFReportGenerator:
         return story
     
     def _sanitize_plotly_figure(self, fig: go.Figure) -> go.Figure:
+    def _sanitize_plotly_figure(self, fig: go.Figure) -> go.Figure:
         """Plotlyグラフの文字化け対策（日本語保持版）"""
         try:
             # figureのコピーを作成
@@ -616,11 +617,8 @@ class PDFReportGenerator:
                         trace.hovertext = [self._sanitize_text_for_chart(str(t)) for t in trace.hovertext]
                     else:
                         trace.hovertext = self._sanitize_text_for_chart(str(trace.hovertext))
-            
-            # --- ▼ここからが修正箇所▼ ---
 
             # クロスプラットフォームで日本語表示の可能性を高めるフォントファミリーリスト
-            # Noto Sans JPを最優先にしつつ、各OSの標準的な日本語フォントをフォールバックとして指定
             font_family_list = [
                 "Noto Sans JP",                 # プロジェクト推奨フォント
                 "Meiryo",                       # Windows (メイリオ)
@@ -633,32 +631,34 @@ class PDFReportGenerator:
             ]
             font_family_str = ", ".join(f'"{name}"' for name in font_family_list)
 
-            # 日本語対応フォント設定の強化
+            # --- ▼ここからがフォントサイズ修正箇所▼ ---
+
+            # 日本語対応フォント設定の強化（フォントサイズを大きく調整）
             fig_copy.update_layout(
                 font=dict(
                     family=font_family_str,
-                    size=10,
+                    size=12,  # デフォルトフォントサイズ (10から変更)
                     color="black"
                 ),
                 title=dict(
-                    font=dict(family=font_family_str, size=14, color="black")
+                    font=dict(family=font_family_str, size=18, color="black") # グラフタイトル (14から変更)
                 ),
                 xaxis=dict(
-                    title=dict(font=dict(family=font_family_str, size=10)),
-                    tickfont=dict(family=font_family_str, size=8)
+                    title=dict(font=dict(family=font_family_str, size=14)), # X軸ラベル (10から変更)
+                    tickfont=dict(family=font_family_str, size=11) # X軸目盛り (8から変更)
                 ),
                 yaxis=dict(
-                    title=dict(font=dict(family=font_family_str, size=10)),
-                    tickfont=dict(family=font_family_str, size=8)
+                    title=dict(font=dict(family=font_family_str, size=14)), # Y軸ラベル (10から変更)
+                    tickfont=dict(family=font_family_str, size=11) # Y軸目盛り (8から変更)
                 ),
                 legend=dict(
-                    font=dict(family=font_family_str, size=8)
+                    font=dict(family=font_family_str, size=12) # 凡例 (8から変更)
                 )
             )
             
-            logger.info(f"Plotlyグラフのフォントファミリーを '{font_family_str}' に設定しました。")
+            logger.info(f"Plotlyグラフのフォントファミリーを '{font_family_str}' に、フォントサイズを拡大して設定しました。")
             
-            # --- ▲ここまでが修正箇所▲ ---
+            # --- ▲ここまでがフォントサイズ修正箇所▲ ---
             
             return fig_copy
             
