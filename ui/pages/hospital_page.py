@@ -64,13 +64,22 @@ class HospitalPage:
             if summary.empty:
                 st.warning("週次推移データがありません。"); return
 
-            # --- ▼ここからがエラー修正箇所▼ ---
-            # 日付情報をインデックスから列に移動し、正しい日付列でフィルタリングする
+            # --- ▼ここからデバッグコード▼ ---
+            st.markdown("---")
+            st.subheader("🐞 デバッグ情報")
+            st.write(f"**選択された期間:**")
+            st.write(f"開始日: `{start_date}`", f"(型: `{type(start_date)}`)")
+            st.write(f"終了日: `{end_date}`", f"(型: `{type(end_date)}`)")
+            
             summary_with_date_col = summary.reset_index()
             date_col = 'index' # reset_index()で作成される列名
             
-            if date_col not in summary_with_date_col.columns:
-                st.error("週次サマリーに日付情報が見つかりません。"); return
+            st.write(f"**週次サマリーデータの先頭5行:**")
+            st.dataframe(summary_with_date_col.head())
+            st.write(f"**日付列（`{date_col}`）のデータ型:** `{summary_with_date_col[date_col].dtype}`")
+            st.markdown("---")
+            # --- ▲ここまでデバッグコード▲ ---
+
 
             summary_with_date_col[date_col] = pd.to_datetime(summary_with_date_col[date_col])
             
@@ -79,9 +88,7 @@ class HospitalPage:
                 (summary_with_date_col[date_col] <= end_date)
             ]
             
-            # グラフ描画のために日付列を再度インデックスに設定
             period_summary = period_summary_df.set_index(date_col)
-            # --- ▲ここまで▲ ---
             
             if period_summary.empty:
                 st.warning("選択期間内の週次データがありません。"); return
@@ -97,6 +104,7 @@ class HospitalPage:
                 st.markdown("**移動平均トレンド（4週移動平均）**")
                 if len(summary) >= 4:
                     summary_ma = summary.copy()
+                    summary_ma.index = pd.to_datetime(summary_ma.index) #念のため
                     summary_ma['4週移動平均'] = summary_ma['平日1日平均件数'].rolling(window=4).mean()
                     period_summary_ma = summary_ma.loc[period_summary.index]
                     fig2 = trend_plots.create_weekly_summary_chart(period_summary_ma, "移動平均トレンド", target_dict)
@@ -118,6 +126,7 @@ class HospitalPage:
         except Exception as e:
             st.error(f"週次推移分析エラー: {e}"); logger.error(f"週次推移分析エラー: {e}")
 
+    # (以降のメソッドは変更なし)
     @staticmethod
     @safe_data_operation("統計分析表示")
     def _render_statistical_analysis(period_df: pd.DataFrame) -> None:
