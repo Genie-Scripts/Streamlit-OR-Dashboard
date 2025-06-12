@@ -92,10 +92,11 @@ class DepartmentPage:
             if not summary.empty:
                 # --- ▼ここからがエラー修正箇所▼ ---
                 summary_with_date_col = summary.reset_index()
-                date_col = 'index' # reset_index()で作成される列名
-
+                # CORRECT: 日付列 '週' を使用
+                date_col = '週'
+                
                 if date_col not in summary_with_date_col.columns:
-                    st.error("週次サマリーに日付情報が見つかりません。"); return
+                    st.error(f"週次サマリーに日付情報列 '{date_col}' が見つかりません。"); return
 
                 summary_with_date_col[date_col] = pd.to_datetime(summary_with_date_col[date_col])
 
