@@ -487,7 +487,7 @@ class PDFReportGenerator:
         
         for chart_name, fig in charts.items():
             try:
-                # グラフの文字化け対策：完全英語化
+                # グラフの日本語対応
                 fig_clean = self._sanitize_plotly_figure(fig)
                 
                 # Plotlyグラフを画像に変換（設定最適化）
@@ -617,30 +617,49 @@ class PDFReportGenerator:
                     else:
                         trace.hovertext = self._sanitize_text_for_chart(str(trace.hovertext))
             
-            # 日本語対応フォント設定
+            # --- ▼ここからが修正箇所▼ ---
+
+            # クロスプラットフォームで日本語表示の可能性を高めるフォントファミリーリスト
+            # Noto Sans JPを最優先にしつつ、各OSの標準的な日本語フォントをフォールバックとして指定
+            font_family_list = [
+                "Noto Sans JP",                 # プロジェクト推奨フォント
+                "Meiryo",                       # Windows (メイリオ)
+                "Yu Gothic",                    # Windows (游ゴシック)
+                "Hiragino Sans",                # macOS (ヒラギノ角ゴシック)
+                "Hiragino Kaku Gothic ProN",    # macOS
+                "IPAexGothic",                  # Linux (要インストール)
+                "Arial Unicode MS",             # 多くの文字をカバー
+                "sans-serif"                    # 最終フォールバック
+            ]
+            font_family_str = ", ".join(f'"{name}"' for name in font_family_list)
+
+            # 日本語対応フォント設定の強化
             fig_copy.update_layout(
                 font=dict(
-                    family="Noto Sans JP, Arial, sans-serif",  # 日本語フォント優先
+                    family=font_family_str,
                     size=10,
                     color="black"
                 ),
                 title=dict(
-                    font=dict(family="Noto Sans JP, Arial, sans-serif", size=14, color="black")
+                    font=dict(family=font_family_str, size=14, color="black")
                 ),
                 xaxis=dict(
-                    title=dict(font=dict(family="Noto Sans JP, Arial, sans-serif", size=10)),
-                    tickfont=dict(family="Noto Sans JP, Arial, sans-serif", size=8)
+                    title=dict(font=dict(family=font_family_str, size=10)),
+                    tickfont=dict(family=font_family_str, size=8)
                 ),
                 yaxis=dict(
-                    title=dict(font=dict(family="Noto Sans JP, Arial, sans-serif", size=10)),
-                    tickfont=dict(family="Noto Sans JP, Arial, sans-serif", size=8)
+                    title=dict(font=dict(family=font_family_str, size=10)),
+                    tickfont=dict(family=font_family_str, size=8)
                 ),
                 legend=dict(
-                    font=dict(family="Noto Sans JP, Arial, sans-serif", size=8)
+                    font=dict(family=font_family_str, size=8)
                 )
             )
             
-            logger.info("Plotlyグラフの日本語処理完了")
+            logger.info(f"Plotlyグラフのフォントファミリーを '{font_family_str}' に設定しました。")
+            
+            # --- ▲ここまでが修正箇所▲ ---
+            
             return fig_copy
             
         except Exception as e:
