@@ -64,9 +64,23 @@ class HospitalPage:
             if summary.empty:
                 st.warning("週次推移データがありません。"); return
 
-            # --- ▼ここがエラー修正箇所▼ ---
-            summary.index = pd.to_datetime(summary.index)
-            period_summary = summary[(summary.index >= start_date) & (summary.index <= end_date)]
+            # --- ▼ここからがエラー修正箇所▼ ---
+            # 日付情報をインデックスから列に移動し、正しい日付列でフィルタリングする
+            summary_with_date_col = summary.reset_index()
+            date_col = 'index' # reset_index()で作成される列名
+            
+            if date_col not in summary_with_date_col.columns:
+                st.error("週次サマリーに日付情報が見つかりません。"); return
+
+            summary_with_date_col[date_col] = pd.to_datetime(summary_with_date_col[date_col])
+            
+            period_summary_df = summary_with_date_col[
+                (summary_with_date_col[date_col] >= start_date) & 
+                (summary_with_date_col[date_col] <= end_date)
+            ]
+            
+            # グラフ描画のために日付列を再度インデックスに設定
+            period_summary = period_summary_df.set_index(date_col)
             # --- ▲ここまで▲ ---
             
             if period_summary.empty:

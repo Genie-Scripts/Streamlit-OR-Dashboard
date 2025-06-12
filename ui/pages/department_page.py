@@ -90,9 +90,21 @@ class DepartmentPage:
             summary = weekly.get_summary(dept_full_df, use_complete_weeks=use_complete_weeks)
             
             if not summary.empty:
-                # --- ▼ここがエラー修正箇所▼ ---
-                summary.index = pd.to_datetime(summary.index)
-                period_summary = summary[(summary.index >= start_date) & (summary.index <= end_date)]
+                # --- ▼ここからがエラー修正箇所▼ ---
+                summary_with_date_col = summary.reset_index()
+                date_col = 'index' # reset_index()で作成される列名
+
+                if date_col not in summary_with_date_col.columns:
+                    st.error("週次サマリーに日付情報が見つかりません。"); return
+
+                summary_with_date_col[date_col] = pd.to_datetime(summary_with_date_col[date_col])
+
+                period_summary_df = summary_with_date_col[
+                    (summary_with_date_col[date_col] >= start_date) & 
+                    (summary_with_date_col[date_col] <= end_date)
+                ]
+
+                period_summary = period_summary_df.set_index(date_col)
                 # --- ▲ここまで▲ ---
                 
                 if period_summary.empty:
