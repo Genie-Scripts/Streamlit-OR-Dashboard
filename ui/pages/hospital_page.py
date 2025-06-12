@@ -1,7 +1,7 @@
-# ui/pages/hospital_page.py
+# ui/pages/hospital_page.py (期間選択機能追加版)
 """
 病院全体分析ページモジュール
-病院全体のパフォーマンス分析を表示
+病院全体のパフォーマンス分析を表示（期間選択機能追加）
 """
 
 import streamlit as st
@@ -11,6 +11,7 @@ import logging
 
 from ui.session_manager import SessionManager
 from ui.error_handler import safe_streamlit_operation, safe_data_operation
+from ui.components.period_selector import PeriodSelector
 
 # 既存の分析モジュールをインポート
 from analysis import weekly, ranking
@@ -41,67 +42,96 @@ class HospitalPage:
         target_dict = SessionManager.get_target_dict()
         latest_date = SessionManager.get_latest_date()
         
+        if df.empty:
+            st.warning("⚠️ データが読み込まれていません")
+            return
+        
+        # 期間選択セクション
+        st.markdown("---")
+        period_name, start_date, end_date = PeriodSelector.render(
+            page_name="hospital_analysis",
+            show_info=True,
+            key_suffix="hospital"
+        )
+        
+        # 期間に基づいてデータをフィルタリング
+        filtered_df = PeriodSelector.filter_data_by_period(df, start_date, end_date)
+        
+        # 期間サマリー表示
+        if start_date and end_date:
+            st.markdown("---")
+            PeriodSelector.render_period_summary(period_name, start_date, end_date, filtered_df)
+        
+        st.markdown("---")
+        
         # 分析期間情報の表示
-        HospitalPage._render_analysis_period_info(df, latest_date)
+        HospitalPage._render_analysis_period_info(filtered_df, start_date, end_date)
         
         # 週次推移グラフ（複数パターン）
-        HospitalPage._render_multiple_trend_patterns(df, target_dict)
+        HospitalPage._render_multiple_trend_patterns(filtered_df, target_dict, period_name)
         
         # 統計分析セクション
-        HospitalPage._render_statistical_analysis(df, latest_date)
+        HospitalPage._render_statistical_analysis(filtered_df, start_date, end_date)
         
-        # 期間別比較セクション
-        HospitalPage._render_period_comparison(df, target_dict, latest_date)
+        # 期間別比較セクション（選択期間vs前期間）
+        HospitalPage._render_period_comparison(df, filtered_df, target_dict, period_name, start_date, end_date)
         
         # トレンド分析セクション
-        HospitalPage._render_trend_analysis(df, latest_date)
+        HospitalPage._render_trend_analysis(filtered_df, start_date, end_date)
     
     @staticmethod
     @safe_data_operation("分析期間情報表示")
-    def _render_analysis_period_info(df: pd.DataFrame, latest_date: Optional[pd.Timestamp]) -> None:
+    def _render_analysis_period_info(filtered_df: pd.DataFrame, 
+                                   start_date: Optional[pd.Timestamp], 
+                                   end_date: Optional[pd.Timestamp]) -> None:
         """分析期間情報を表示"""
-        if latest_date is None:
-            st.warning("分析可能な日付データがありません。")
+        if filtered_df.empty:
+            st.warning("選択期間にデータがありません")
             return
         
-        analysis_end_sunday = weekly.get_analysis_end_date(latest_date)
-        if analysis_end_sunday is None:
-            st.warning("分析可能な日付データがありません。")
-            return
+        # データ期間の情報
+        data_start = filtered_df['手術実施日_dt'].min()
+        data_end = filtered_df['手術実施日_dt'].max()
+        total_records = len(filtered_df)
         
-        excluded_days = (latest_date - analysis_end_sunday).days
-        df_complete_weeks = df[df['手術実施日_dt'] <= analysis_end_sunday]
-        total_records = len(df_complete_weeks)
+        # 全身麻酔20分以上の件数
+        gas_records = len(filtered_df[filtered_df['is_gas_20min']]) if 'is_gas_20min' in filtered_df.columns else 0
         
         # メトリクス表示
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("📊 総レコード数", f"{total_records:,}件")
         with col2:
-            st.metric("📅 最新データ日", latest_date.strftime('%Y/%m/%d'))
+            st.metric("🔴 全身麻酔20分以上", f"{gas_records:,}件")
         with col3:
-            st.metric("🎯 分析終了日", analysis_end_sunday.strftime('%Y/%m/%d'))
+            st.metric("📅 データ開始日", data_start.strftime('%Y/%m/%d'))
         with col4:
-            st.metric("⚠️ 除外日数", f"{excluded_days}日")
+            st.metric("📅 データ終了日", data_end.strftime('%Y/%m/%d'))
         
-        st.caption(
-            f"💡 最新データが{latest_date.strftime('%A')}のため、"
-            f"分析精度向上のため前の日曜日({analysis_end_sunday.strftime('%Y/%m/%d')})までを分析対象としています。"
-        )
+        # 選択期間との整合性確認
+        if start_date and end_date:
+            if data_start < start_date or data_end > end_date:
+                st.info(
+                    f"💡 選択期間: {start_date.strftime('%Y/%m/%d')} ～ {end_date.strftime('%Y/%m/%d')} "
+                    f"でデータをフィルタリングしています"
+                )
+        
         st.markdown("---")
     
     @staticmethod
     @safe_data_operation("複数トレンドパターン表示")
-    def _render_multiple_trend_patterns(df: pd.DataFrame, target_dict: Dict[str, Any]) -> None:
+    def _render_multiple_trend_patterns(filtered_df: pd.DataFrame, 
+                                      target_dict: Dict[str, Any],
+                                      period_name: str) -> None:
         """複数の週次推移パターンを表示"""
-        st.subheader("📈 週次推移分析（複数パターン）")
+        st.subheader(f"📈 週次推移分析 - {period_name}")
         
         try:
-            # 完全週データ取得
-            summary = weekly.get_summary(df, use_complete_weeks=True)
+            # 完全週データ取得（フィルタ済みデータで）
+            summary = weekly.get_summary(filtered_df, use_complete_weeks=True)
             
             if summary.empty:
-                st.warning("週次推移データがありません。")
+                st.warning("選択期間の週次推移データがありません。")
                 return
             
             # DataFrameの構造確認
@@ -118,12 +148,14 @@ class HospitalPage:
             tab1, tab2, tab3 = st.tabs(["📊 標準推移", "📈 移動平均", "🎯 目標比較"])
             
             with tab1:
-                st.markdown("**標準的な週次推移（平日1日平均）**")
-                fig1 = trend_plots.create_weekly_summary_chart(summary, "病院全体 週次推移", target_dict)
+                st.markdown(f"**{period_name}の週次推移（平日1日平均）**")
+                fig1 = trend_plots.create_weekly_summary_chart(
+                    summary, f"病院全体 週次推移 ({period_name})", target_dict
+                )
                 st.plotly_chart(fig1, use_container_width=True)
             
             with tab2:
-                st.markdown("**移動平均トレンド（4週移動平均）**")
+                st.markdown(f"**移動平均トレンド（4週移動平均）- {period_name}**")
                 if len(summary) >= 4:
                     try:
                         summary_ma = summary.copy()
@@ -131,18 +163,16 @@ class HospitalPage:
                         
                         # 移動平均チャートを既存関数で作成
                         fig2 = trend_plots.create_weekly_summary_chart(
-                            summary_ma, "移動平均トレンド（4週移動平均）", target_dict
+                            summary_ma, f"移動平均トレンド（4週移動平均）- {period_name}", target_dict
                         )
                         st.plotly_chart(fig2, use_container_width=True)
                         
                         # 移動平均の数値テーブル
                         with st.expander("移動平均データ"):
                             try:
-                                # DataFrameをコピーしてインデックスをリセット
                                 ma_display = summary_ma[['平日1日平均件数', '4週移動平均']].dropna().reset_index()
                                 st.dataframe(ma_display.round(1), use_container_width=True)
                             except Exception as e:
-                                st.write("移動平均データ:")
                                 st.dataframe(summary_ma[['平日1日平均件数', '4週移動平均']].dropna().round(1))
                     except Exception as e:
                         st.error(f"移動平均計算エラー: {e}")
@@ -151,7 +181,7 @@ class HospitalPage:
                     st.info("移動平均計算には最低4週間のデータが必要です。")
             
             with tab3:
-                st.markdown("**目標達成率推移**")
+                st.markdown(f"**目標達成率推移 - {period_name}**")
                 if target_dict:
                     try:
                         from config.hospital_targets import HospitalTargets
@@ -162,7 +192,7 @@ class HospitalPage:
                         
                         # 達成率チャートを既存関数で作成
                         fig3 = trend_plots.create_weekly_summary_chart(
-                            summary_target, "目標達成率推移", target_dict
+                            summary_target, f"目標達成率推移 - {period_name}", target_dict
                         )
                         st.plotly_chart(fig3, use_container_width=True)
                         
@@ -210,71 +240,71 @@ class HospitalPage:
         except Exception as e:
             st.error(f"週次推移分析エラー: {e}")
             logger.error(f"週次推移分析エラー: {e}")
-            # デバッグ情報を表示
-            if not summary.empty:
-                st.write("デバッグ情報:")
-                st.write(f"DataFrameの形状: {summary.shape}")
-                st.write(f"利用可能な列: {list(summary.columns)}")
-                st.dataframe(summary.head())
     
     @staticmethod
     @safe_data_operation("統計分析表示")
-    def _render_statistical_analysis(df: pd.DataFrame, latest_date: Optional[pd.Timestamp]) -> None:
+    def _render_statistical_analysis(filtered_df: pd.DataFrame,
+                                   start_date: Optional[pd.Timestamp], 
+                                   end_date: Optional[pd.Timestamp]) -> None:
         """統計分析セクションを表示"""
         st.markdown("---")
         st.subheader("📊 統計分析・パフォーマンス指標")
         
         try:
-            if latest_date is None:
-                st.warning("統計分析に必要な日付データがありません。")
+            if filtered_df.empty:
+                st.warning("選択期間に統計分析可能なデータがありません。")
                 return
             
-            # 直近4週間のデータでKPI計算
-            analysis_end_date = weekly.get_analysis_end_date(latest_date)
-            if analysis_end_date:
-                four_weeks_ago = analysis_end_date - pd.Timedelta(days=27)
-                recent_df = df[
-                    (df['手術実施日_dt'] >= four_weeks_ago) & 
-                    (df['手術実施日_dt'] <= analysis_end_date) &
-                    (df['is_gas_20min'] == True)
-                ]
+            # 全身麻酔20分以上のデータでKPI計算
+            gas_df = filtered_df[filtered_df['is_gas_20min']] if 'is_gas_20min' in filtered_df.columns else filtered_df
+            
+            if gas_df.empty:
+                st.warning("選択期間に全身麻酔20分以上のデータがありません。")
+                return
+            
+            # KPI表示（期間限定版）
+            st.markdown("**📈 主要業績指標 (選択期間)**")
+            
+            # 期間統計を計算
+            period_stats = SessionManager.get_period_stats("hospital_analysis", start_date, end_date)
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("🔴 全身麻酔手術", f"{period_stats.get('gas_cases', 0):,}件")
+            
+            with col2:
+                st.metric("📊 全手術件数", f"{period_stats.get('total_cases', 0):,}件")
+            
+            with col3:
+                st.metric("📈 平日1日平均", f"{period_stats.get('daily_avg', 0):.1f}件/日")
+            
+            with col4:
+                weekdays = period_stats.get('weekdays', 0)
+                st.metric("🗓️ 対象平日数", f"{weekdays}日")
+            
+            # 診療科別統計
+            st.markdown("**🏥 診療科別統計分析（選択期間）**")
+            dept_stats = HospitalPage._calculate_department_statistics(gas_df)
+            
+            if not dept_stats.empty:
+                col1, col2 = st.columns(2)
                 
-                if recent_df.empty:
-                    st.warning("統計分析対象データがありません。")
-                    return
+                with col1:
+                    st.markdown("**上位5診療科 (件数)**")
+                    top5 = dept_stats.head().round(1)
+                    st.dataframe(top5, use_container_width=True)
                 
-                # KPI計算
-                kpi_summary = ranking.get_kpi_summary(df, latest_date)
-                
-                # KPI表示
-                st.markdown("**📈 主要業績指標 (KPI)**")
-                generic_plots.display_kpi_metrics(kpi_summary)
-                
-                # 診療科別統計
-                st.markdown("**🏥 診療科別統計分析**")
-                dept_stats = HospitalPage._calculate_department_statistics(recent_df)
-                
-                if not dept_stats.empty:
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("**上位5診療科 (件数)**")
-                        top5 = dept_stats.head().round(1)
-                        st.dataframe(top5, use_container_width=True)
-                    
-                    with col2:
-                        st.markdown("**統計サマリー**")
-                        st.write(f"• 診療科数: {len(dept_stats)}科")
-                        st.write(f"• 平均件数: {dept_stats['合計件数'].mean():.1f}件")
-                        st.write(f"• 最大差: {dept_stats['合計件数'].max() - dept_stats['合計件数'].min():.1f}件")
-                        st.write(f"• 標準偏差: {dept_stats['合計件数'].std():.1f}")
-                
-                # 時系列統計（機械学習が利用可能な場合）
-                if SKLEARN_AVAILABLE:
-                    HospitalPage._render_advanced_statistics(recent_df)
-                
-            else:
-                st.warning("分析期間を設定できませんでした。")
+                with col2:
+                    st.markdown("**統計サマリー**")
+                    st.write(f"• 診療科数: {len(dept_stats)}科")
+                    st.write(f"• 平均件数: {dept_stats['合計件数'].mean():.1f}件")
+                    st.write(f"• 最大差: {dept_stats['合計件数'].max() - dept_stats['合計件数'].min():.1f}件")
+                    st.write(f"• 標準偏差: {dept_stats['合計件数'].std():.1f}")
+            
+            # 時系列統計（機械学習が利用可能な場合）
+            if SKLEARN_AVAILABLE:
+                HospitalPage._render_advanced_statistics(gas_df)
                 
         except Exception as e:
             st.error(f"統計分析エラー: {e}")
@@ -344,60 +374,74 @@ class HospitalPage:
     
     @staticmethod
     @safe_data_operation("期間比較表示")
-    def _render_period_comparison(df: pd.DataFrame, target_dict: Dict[str, Any], 
-                                 latest_date: Optional[pd.Timestamp]) -> None:
+    def _render_period_comparison(full_df: pd.DataFrame,
+                                filtered_df: pd.DataFrame,
+                                target_dict: Dict[str, Any], 
+                                period_name: str,
+                                start_date: Optional[pd.Timestamp], 
+                                end_date: Optional[pd.Timestamp]) -> None:
         """期間別比較セクションを表示"""
         st.markdown("---")
         st.subheader("📅 期間別比較分析")
         
         try:
-            if latest_date is None:
-                st.warning("期間比較に必要な日付データがありません。")
+            if not start_date or not end_date:
+                st.warning("期間比較には有効な期間選択が必要です。")
                 return
             
-            analysis_end_date = weekly.get_analysis_end_date(latest_date)
-            if not analysis_end_date:
-                st.warning("分析期間を設定できませんでした。")
-                return
+            # 前期間の計算
+            period_length = (end_date - start_date).days + 1
+            prev_end_date = start_date - pd.Timedelta(days=1)
+            prev_start_date = prev_end_date - pd.Timedelta(days=period_length-1)
             
-            # 期間設定
-            periods = {
-                "直近4週": 28,
-                "直近8週": 56,
-                "直近12週": 84
-            }
+            # 前期間のデータを取得
+            prev_df = full_df[
+                (full_df['手術実施日_dt'] >= prev_start_date) & 
+                (full_df['手術実施日_dt'] <= prev_end_date)
+            ]
             
+            # 比較データの準備
             comparison_data = []
             
-            for period_name, days in periods.items():
-                start_date = analysis_end_date - pd.Timedelta(days=days-1)
-                period_df = df[
-                    (df['手術実施日_dt'] >= start_date) & 
-                    (df['手術実施日_dt'] <= analysis_end_date) &
-                    (df['is_gas_20min'] == True)
-                ]
+            # 現在期間
+            current_gas_df = filtered_df[filtered_df['is_gas_20min']] if 'is_gas_20min' in filtered_df.columns else filtered_df
+            current_weekday_df = current_gas_df[current_gas_df['is_weekday']] if 'is_weekday' in current_gas_df.columns else current_gas_df
+            current_weekdays = PeriodSelector.calculate_weekdays_in_period(start_date, end_date)
+            current_daily_avg = len(current_weekday_df) / current_weekdays if current_weekdays > 0 else 0
+            
+            comparison_data.append({
+                "期間": f"現在期間 ({period_name})",
+                "総件数": len(current_gas_df),
+                "平日平均/日": round(current_daily_avg, 1),
+                "期間": f"{start_date.strftime('%m/%d')} - {end_date.strftime('%m/%d')}"
+            })
+            
+            # 前期間
+            if not prev_df.empty:
+                prev_gas_df = prev_df[prev_df['is_gas_20min']] if 'is_gas_20min' in prev_df.columns else prev_df
+                prev_weekday_df = prev_gas_df[prev_gas_df['is_weekday']] if 'is_weekday' in prev_gas_df.columns else prev_gas_df
+                prev_weekdays = PeriodSelector.calculate_weekdays_in_period(prev_start_date, prev_end_date)
+                prev_daily_avg = len(prev_weekday_df) / prev_weekdays if prev_weekdays > 0 else 0
                 
-                if not period_df.empty:
-                    # 平日のみの件数
-                    weekday_df = period_df[period_df['is_weekday']]
-                    total_days = days
-                    weekdays = sum(1 for i in range(total_days) 
-                                 if (start_date + pd.Timedelta(days=i)).weekday() < 5)
-                    
-                    daily_avg = len(weekday_df) / weekdays if weekdays > 0 else 0
-                    total_cases = len(period_df)
-                    
-                    comparison_data.append({
-                        "期間": period_name,
-                        "総件数": total_cases,
-                        "平日平均/日": round(daily_avg, 1),
-                        "期間": f"{start_date.strftime('%m/%d')} - {analysis_end_date.strftime('%m/%d')}"
-                    })
+                comparison_data.append({
+                    "期間": "前期間",
+                    "総件数": len(prev_gas_df),
+                    "平日平均/日": round(prev_daily_avg, 1),
+                    "期間": f"{prev_start_date.strftime('%m/%d')} - {prev_end_date.strftime('%m/%d')}"
+                })
             
             if comparison_data:
                 # 比較テーブル表示
                 comparison_df = pd.DataFrame(comparison_data)
                 st.dataframe(comparison_df, use_container_width=True)
+                
+                # 前期間比較メトリクス
+                if len(comparison_data) >= 2:
+                    PeriodSelector.render_period_comparison_metrics(
+                        current_gas_df, 
+                        prev_gas_df if not prev_df.empty else pd.DataFrame(),
+                        "全身麻酔手術"
+                    )
                 
                 # 目標達成状況比較
                 if target_dict:
@@ -420,10 +464,10 @@ class HospitalPage:
                 
                 # トレンド方向の分析
                 if len(comparison_data) >= 2:
-                    recent_avg = comparison_data[0]["平日平均/日"]  # 直近4週
-                    longer_avg = comparison_data[-1]["平日平均/日"]  # 直近12週
+                    current_avg = comparison_data[0]["平日平均/日"]
+                    prev_avg = comparison_data[1]["平日平均/日"]
                     
-                    trend_change = ((recent_avg / longer_avg - 1) * 100) if longer_avg > 0 else 0
+                    trend_change = ((current_avg / prev_avg - 1) * 100) if prev_avg > 0 else 0
                     
                     st.markdown("**📈 トレンド分析**")
                     if trend_change > 5:
@@ -441,21 +485,23 @@ class HospitalPage:
     
     @staticmethod
     @safe_data_operation("トレンド分析表示")
-    def _render_trend_analysis(df: pd.DataFrame, latest_date: Optional[pd.Timestamp]) -> None:
+    def _render_trend_analysis(filtered_df: pd.DataFrame,
+                             start_date: Optional[pd.Timestamp], 
+                             end_date: Optional[pd.Timestamp]) -> None:
         """トレンド分析セクションを表示"""
         st.markdown("---")
         st.subheader("🔮 詳細トレンド分析・予測")
         
         try:
-            if latest_date is None:
-                st.warning("トレンド分析に必要な日付データがありません。")
+            if filtered_df.empty:
+                st.warning("選択期間にトレンド分析可能なデータがありません。")
                 return
             
             # 週次データでトレンド分析
-            summary = weekly.get_summary(df, use_complete_weeks=True)
+            summary = weekly.get_summary(filtered_df, use_complete_weeks=True)
             
             if summary.empty:
-                st.warning("トレンド分析用データがありません。")
+                st.warning("選択期間のトレンド分析用データがありません。")
                 return
             
             tab1, tab2, tab3 = st.tabs(["📈 基本トレンド", "📊 季節性分析", "🔮 短期予測"])
@@ -464,7 +510,7 @@ class HospitalPage:
                 HospitalPage._render_basic_trend_analysis(summary)
             
             with tab2:
-                HospitalPage._render_seasonality_analysis(summary, df)
+                HospitalPage._render_seasonality_analysis(summary, filtered_df)
             
             with tab3:
                 HospitalPage._render_short_term_prediction(summary)
@@ -640,134 +686,6 @@ class HospitalPage:
         except Exception as e:
             logger.error(f"短期予測エラー: {e}")
             st.warning("短期予測でエラーが発生しました。")
-    
-    @staticmethod
-    @safe_data_operation("パフォーマンスダッシュボード表示")
-    def _render_performance_dashboard(df: pd.DataFrame, target_dict: Dict[str, Any], 
-                                    latest_date: Optional[pd.Timestamp]) -> None:
-        """診療科別パフォーマンスダッシュボードを表示"""
-        st.subheader("📊 診療科別パフォーマンスダッシュボード（直近4週データ分析）")
-        
-        if latest_date:
-            analysis_end_sunday = weekly.get_analysis_end_date(latest_date)
-            if analysis_end_sunday:
-                four_weeks_ago = analysis_end_sunday - pd.Timedelta(days=27)
-                st.caption(f"🗓️ 分析対象期間: {four_weeks_ago.strftime('%Y/%m/%d')} ~ {analysis_end_sunday.strftime('%Y/%m/%d')}")
-        
-        # パフォーマンスサマリーを取得
-        try:
-            perf_summary = ranking.get_department_performance_summary(df, target_dict, latest_date)
-            
-            if not perf_summary.empty:
-                if '達成率(%)' not in perf_summary.columns:
-                    st.warning("パフォーマンスデータに達成率の列が見つかりません。")
-                    return
-                
-                # 達成率順にソート
-                sorted_perf = perf_summary.sort_values("達成率(%)", ascending=False)
-                
-                # パフォーマンスカードの表示
-                HospitalPage._render_performance_cards(sorted_perf)
-                
-                # 詳細データテーブル
-                with st.expander("詳細データテーブル"):
-                    st.dataframe(sorted_perf, use_container_width=True)
-            else:
-                st.info("診療科別パフォーマンスを計算する十分なデータがありません。")
-                
-        except Exception as e:
-            st.error(f"パフォーマンス計算エラー: {e}")
-            logger.error(f"パフォーマンス計算エラー: {e}")
-    
-    @staticmethod
-    def _render_performance_cards(sorted_perf: pd.DataFrame) -> None:
-        """パフォーマンスカードを表示"""
-        def get_color_for_rate(rate):
-            if rate >= 100:
-                return "#28a745"
-            if rate >= 80:
-                return "#ffc107"
-            return "#dc3545"
-        
-        cols = st.columns(3)
-        for i, (idx, row) in enumerate(sorted_perf.iterrows()):
-            with cols[i % 3]:
-                rate = row["達成率(%)"]
-                color = get_color_for_rate(rate)
-                bar_width = min(rate, 100)
-                
-                html = f"""
-                <div style="
-                    background-color: {color}1A; 
-                    border-left: 5px solid {color}; 
-                    padding: 12px; 
-                    border-radius: 5px; 
-                    margin-bottom: 12px; 
-                    height: 165px;
-                ">
-                    <h5 style="margin: 0 0 10px 0; font-weight: bold; color: #333;">{row["診療科"]}</h5>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.9em;">
-                        <span>4週平均:</span>
-                        <span style="font-weight: bold;">{row["4週平均"]:.1f} 件</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.9em;">
-                        <span>直近週実績:</span>
-                        <span style="font-weight: bold;">{row["直近週実績"]:.0f} 件</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #666;">
-                        <span>目標:</span>
-                        <span>{row["週次目標"]:.1f} 件</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 1.1em; color: {color}; margin-top: 5px;">
-                        <span style="font-weight: bold;">達成率:</span>
-                        <span style="font-weight: bold;">{rate:.1f}%</span>
-                    </div>
-                    <div style="background-color: #e9ecef; border-radius: 5px; height: 6px; margin-top: 5px;">
-                        <div style="width: {bar_width}%; background-color: {color}; height: 6px; border-radius: 5px;"></div>
-                    </div>
-                </div>
-                """
-                st.markdown(html, unsafe_allow_html=True)
-    
-    @staticmethod
-    @safe_data_operation("週次推移表示")
-    def _render_weekly_trend_section(df: pd.DataFrame, target_dict: Dict[str, Any]) -> None:
-        """週次推移セクションを表示"""
-        st.markdown("---")
-        st.subheader("📈 全身麻酔手術件数 週次推移（完全週データ）")
-        
-        try:
-            summary = weekly.get_summary(df, use_complete_weeks=True)
-            
-            if not summary.empty:
-                fig = trend_plots.create_weekly_summary_chart(summary, "", target_dict)
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # 統計情報
-                with st.expander("📊 統計情報"):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write("**基本統計:**")
-                        st.write(f"• 週数: {len(summary)}週")
-                        st.write(f"• 最大値: {summary['平日1日平均件数'].max():.1f}件/日")
-                        st.write(f"• 最小値: {summary['平日1日平均件数'].min():.1f}件/日")
-                        st.write(f"• 平均値: {summary['平日1日平均件数'].mean():.1f}件/日")
-                    
-                    with col2:
-                        st.write("**トレンド分析:**")
-                        if len(summary) >= 2:
-                            recent_avg = summary.tail(4)['平日1日平均件数'].mean()
-                            earlier_avg = summary.head(4)['平日1日平均件数'].mean()
-                            trend = "上昇" if recent_avg > earlier_avg else "下降"
-                            st.write(f"• 直近トレンド: {trend}")
-                            st.write(f"• 変化率: {((recent_avg/earlier_avg - 1)*100):+.1f}%")
-            else:
-                st.warning("週次トレンドデータがありません")
-                
-        except Exception as e:
-            st.error(f"週次推移分析エラー: {e}")
-            logger.error(f"週次推移分析エラー: {e}")
 
 
 # ページルーター用の関数
