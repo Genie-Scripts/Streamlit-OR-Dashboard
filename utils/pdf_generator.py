@@ -574,7 +574,6 @@ class PDFReportGenerator:
         return story
     
     def _sanitize_plotly_figure(self, fig: go.Figure) -> go.Figure:
-    def _sanitize_plotly_figure(self, fig: go.Figure) -> go.Figure:
         """Plotlyグラフの文字化け対策（日本語保持版）"""
         try:
             # figureのコピーを作成
