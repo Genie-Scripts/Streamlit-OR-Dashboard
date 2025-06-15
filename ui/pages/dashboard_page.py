@@ -619,6 +619,9 @@ class DashboardPage:
                 # パフォーマンスカードの表示
                 DashboardPage._render_performance_cards(sorted_perf)
                 
+                # HTMLエクスポートボタンを追加
+                DashboardPage._render_performance_html_export(sorted_perf, start_date, end_date)
+                
                 # 詳細データテーブル
                 with st.expander("📋 詳細データテーブル"):
                     st.dataframe(sorted_perf, use_container_width=True)
@@ -632,7 +635,253 @@ class DashboardPage:
             st.error(f"パフォーマンス計算エラー: {e}")
             logger.error(f"パフォーマンス計算エラー: {e}")
             return pd.DataFrame()
-    
+
+    @staticmethod
+    def _render_performance_html_export(sorted_perf: pd.DataFrame, 
+                                    start_date: Optional[pd.Timestamp], 
+                                    end_date: Optional[pd.Timestamp]) -> None:
+        """パフォーマンスカードのHTMLエクスポートボタンを表示"""
+        
+        def get_color_for_rate(rate):
+            if rate >= 100:
+                return "#28a745"
+            if rate >= 80:
+                return "#ffc107"
+            return "#dc3545"
+        
+        # HTMLカードを生成
+        html_cards = ""
+        for idx, row in sorted_perf.iterrows():
+            rate = row["達成率(%)"]
+            color = get_color_for_rate(rate)
+            bar_width = min(rate, 100)
+            
+            # 期間平均の表示名を動的に決定
+            period_label = "期間平均" if "期間平均" in row.index else "4週平均"
+            period_value = row.get("期間平均", row.get("4週平均", 0))
+            
+            card_html = f"""
+            <div class="metric-card" style="
+                background-color: {color}1A; 
+                border-left: 5px solid {color}; 
+                padding: 12px; 
+                border-radius: 5px; 
+                height: 165px;
+                box-sizing: border-box;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+            ">
+                <h5 style="margin: 0 0 10px 0; font-weight: bold; color: #333;">{row["診療科"]}</h5>
+                <div style="display: flex; justify-content: space-between; font-size: 0.9em;">
+                    <span>{period_label}:</span>
+                    <span style="font-weight: bold;">{period_value:.1f} 件</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 0.9em;">
+                    <span>直近週実績:</span>
+                    <span style="font-weight: bold;">{row["直近週実績"]:.0f} 件</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: #666;">
+                    <span>目標:</span>
+                    <span>{row["週次目標"]:.1f} 件</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 1.1em; color: {color}; margin-top: 5px;">
+                    <span style="font-weight: bold;">達成率:</span>
+                    <span style="font-weight: bold;">{rate:.1f}%</span>
+                </div>
+                <div style="background-color: #e9ecef; border-radius: 5px; height: 6px; margin-top: 5px;">
+                    <div style="width: {bar_width}%; background-color: {color}; height: 6px; border-radius: 5px;"></div>
+                </div>
+            </div>
+            """
+            html_cards += f'<div class="grid-item">{card_html}</div>'
+        
+        # 期間の説明文を生成
+        if start_date and end_date:
+            period_desc = f"{start_date.strftime('%Y/%m/%d')} ~ {end_date.strftime('%Y/%m/%d')}"
+        else:
+            period_desc = "全期間"
+        
+        # レスポンシブグリッドレイアウトのHTMLテンプレート
+        html_content = f"""<!DOCTYPE html>
+    <html lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>診療科別パフォーマンスダッシュボード - {period_desc}</title>
+        <style>
+            body {{
+                background: #f5f7fa;
+                font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                margin: 0;
+                padding: 20px;
+                color: #333;
+            }}
+            
+            h1 {{
+                text-align: center;
+                color: #293a27;
+                margin-bottom: 10px;
+                font-size: 24px;
+            }}
+            
+            .subtitle {{
+                text-align: center;
+                color: #666;
+                margin-bottom: 30px;
+                font-size: 14px;
+            }}
+            
+            .grid-container {{
+                display: grid;
+                gap: 20px;
+                max-width: 1920px;
+                margin: 0 auto;
+            }}
+            
+            /* デフォルト: 3列レイアウト */
+            .grid-container {{
+                grid-template-columns: repeat(3, 1fr);
+            }}
+            
+            /* 大画面: 4列レイアウト */
+            @media (min-width: 1400px) {{
+                .grid-container {{
+                    grid-template-columns: repeat(4, 1fr);
+                }}
+            }}
+            
+            /* 超大画面: 5列レイアウト */
+            @media (min-width: 1800px) {{
+                .grid-container {{
+                    grid-template-columns: repeat(5, 1fr);
+                }}
+            }}
+            
+            /* タブレット: 2列レイアウト */
+            @media (max-width: 900px) {{
+                .grid-container {{
+                    grid-template-columns: repeat(2, 1fr);
+                }}
+            }}
+            
+            /* モバイル: 1列レイアウト */
+            @media (max-width: 600px) {{
+                .grid-container {{
+                    grid-template-columns: 1fr;
+                }}
+            }}
+            
+            .grid-item {{
+                min-height: 165px;
+            }}
+            
+            .metric-card {{
+                transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            }}
+            
+            .metric-card:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            }}
+            
+            .summary {{
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                margin-bottom: 30px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            }}
+            
+            .summary-stats {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 15px;
+                text-align: center;
+            }}
+            
+            .stat-item {{
+                padding: 10px;
+            }}
+            
+            .stat-value {{
+                font-size: 24px;
+                font-weight: bold;
+                color: #293a27;
+            }}
+            
+            .stat-label {{
+                font-size: 14px;
+                color: #666;
+                margin-top: 5px;
+            }}
+            
+            @media print {{
+                body {{
+                    padding: 10px;
+                }}
+                .grid-container {{
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 15px;
+                }}
+                .metric-card:hover {{
+                    transform: none;
+                    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+                }}
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>診療科別パフォーマンスダッシュボード</h1>
+        <div class="subtitle">分析期間: {period_desc}</div>
+        
+        <div class="summary">
+            <div class="summary-stats">
+                <div class="stat-item">
+                    <div class="stat-value">{len(sorted_perf)}</div>
+                    <div class="stat-label">診療科数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">{len(sorted_perf[sorted_perf['達成率(%)'] >= 100])}</div>
+                    <div class="stat-label">目標達成科数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">{sorted_perf['達成率(%)'].mean():.1f}%</div>
+                    <div class="stat-label">平均達成率</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="grid-container">
+            {html_cards}
+        </div>
+        
+        <div style="text-align: center; margin-top: 40px; color: #999; font-size: 12px;">
+            生成日時: {datetime.now().strftime('%Y年%m月%d日 %H:%M')}
+        </div>
+    </body>
+    </html>
+    """
+        
+        # ダウンロードボタン
+        st.markdown("---")
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.info("📄 パフォーマンスカードをHTMLファイルとしてダウンロードできます。ブラウザで開くとインタラクティブに表示されます。")
+        
+        with col2:
+            st.download_button(
+                label="📥 HTMLダウンロード",
+                data=html_content.encode("utf-8"),
+                file_name=f"診療科別パフォーマンス_{datetime.now().strftime('%Y%m%d')}.html",
+                mime="text/html",
+                help="診療科別パフォーマンスカードをHTMLファイルとしてダウンロード",
+                type="primary",
+                use_container_width=True
+            )
+
     @staticmethod
     def _render_pdf_export_section(kpi_data: Dict[str, Any], 
                                  performance_data: pd.DataFrame,
