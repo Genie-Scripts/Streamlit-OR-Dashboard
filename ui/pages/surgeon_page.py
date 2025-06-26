@@ -809,8 +809,8 @@ class SurgeonPage:
                 else:
                     st.metric("平日手術比率", "N/A")
                     
-    except Exception as e:
-        logger.error(f"パフォーマンス指標表示エラー: {e}")
+        except Exception as e:
+            logger.error(f"パフォーマンス指標表示エラー: {e}")
     
     @staticmethod
     def _render_period_comparison_tab(current_period_name: str) -> None:
