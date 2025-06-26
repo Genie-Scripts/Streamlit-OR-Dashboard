@@ -520,8 +520,8 @@ class SurgeonPage:
                 st.warning(f"{dept_name}の術者データを生成できませんでした")
                 
         except Exception as e:
-        logger.error(f"単一診療科分析エラー: {e}")
-        st.error("診療科分析でエラーが発生しました")
+            logger.error(f"単一診療科分析エラー: {e}")
+            st.error("診療科分析でエラーが発生しました")
     
     @staticmethod
     def _render_department_time_series(dept_df: pd.DataFrame, 
