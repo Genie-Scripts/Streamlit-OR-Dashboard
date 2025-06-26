@@ -268,7 +268,7 @@ class DepartmentPage:
                         target_value = target_dict.get(dept_name)
                         if target_value:
                             avg_actual = summary['週合計件数'].mean()
-                            achievement_rate = (avg_actual / target_value) * 100
+                            achievement_rate = (avg_actual / target_value * 100)
                             st.write(f"• 目標値: {target_value:.1f}件/週")
                             st.write(f"• 平均達成率: {achievement_rate:.1f}%")
                             
@@ -335,49 +335,29 @@ class DepartmentPage:
                     surgeon_summary = surgeon.get_surgeon_summary(expanded_df)
                     
                     if not surgeon_summary.empty:
-                        # 列名を確認してデバッグ
-                        logger.info(f"surgeon_summary columns: {surgeon_summary.columns.tolist()}")
+                        # get_surgeon_summaryは '実施術者', '件数' を返すことを想定
+                        fig = generic_plots.plot_surgeon_ranking(
+                            surgeon_summary, 15, f"{dept_name} ({period_name})"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
                         
-                        # 件数列の列名を特定（可能性のある列名をチェック）
-                        count_column = None
-                        for col in ['手術件数', '件数', 'count', 'Count', 'surgery_count']:
-                            if col in surgeon_summary.columns:
-                                count_column = col
-                                break
+                        # 術者統計
+                        col1, col2, col3 = st.columns(3)
                         
-                        if count_column is None:
-                            # 数値列の最初の列を使用
-                            numeric_cols = surgeon_summary.select_dtypes(include=['int64', 'float64']).columns
-                            if len(numeric_cols) > 0:
-                                count_column = numeric_cols[0]
-                                logger.warning(f"件数列が見つからないため、{count_column}を使用")
+                        with col1:
+                            st.metric("👨‍⚕️ 術者数", f"{len(surgeon_summary)}名")
                         
-                        if count_column:
-                            fig = generic_plots.plot_surgeon_ranking(
-                                surgeon_summary, 15, f"{dept_name} ({period_name})"
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            # 術者統計
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                st.metric("👨‍⚕️ 術者数", f"{len(surgeon_summary)}名")
-                            
-                            with col2:
-                                top_surgeon_cases = surgeon_summary.iloc[0][count_column] if len(surgeon_summary) > 0 else 0
-                                st.metric("🏆 最多術者件数", f"{top_surgeon_cases}件")
-                            
-                            with col3:
-                                avg_cases = surgeon_summary[count_column].mean()
-                                st.metric("📊 平均件数", f"{avg_cases:.1f}件")
-                            
-                            # 詳細データテーブル
-                            with st.expander("術者別詳細データ"):
-                                st.dataframe(surgeon_summary.head(15), use_container_width=True)
-                        else:
-                            st.warning("術者サマリーに件数データが含まれていません")
-                            st.write("利用可能な列:", surgeon_summary.columns.tolist())
+                        with col2:
+                            top_surgeon_cases = surgeon_summary.iloc[0]['件数'] if len(surgeon_summary) > 0 else 0
+                            st.metric("🏆 最多術者件数", f"{top_surgeon_cases}件")
+                        
+                        with col3:
+                            avg_cases = surgeon_summary['件数'].mean()
+                            st.metric("📊 平均件数", f"{avg_cases:.1f}件")
+                        
+                        # 詳細データテーブル
+                        with st.expander("術者別詳細データ"):
+                            st.dataframe(surgeon_summary.head(15), use_container_width=True)
                     else:
                         st.info("術者データを集計できませんでした")
                 else:
@@ -385,8 +365,7 @@ class DepartmentPage:
                     
         except Exception as e:
             st.error(f"術者分析エラー: {e}")
-            logger.error(f"術者分析エラー ({dept_name}): {e}")
-        logger.error(f"エラー詳細: {type(e).__name__}: {str(e)}")
+            logger.error(f"術者分析エラー ({dept_name}): {e}", exc_info=True)
     
     @staticmethod
     @safe_data_operation("時間分析")
