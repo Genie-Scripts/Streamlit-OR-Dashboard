@@ -168,6 +168,23 @@ class SurgeonPage:
                                       expanded_df: pd.DataFrame) -> None:
         """術者統計サマリーメトリクス"""
         try:
+            # 件数列の列名を特定
+            count_column = None
+            for col in ['手術件数', '件数', 'count', 'Count', 'surgery_count']:
+                if col in surgeon_summary.columns:
+                    count_column = col
+                    break
+            
+            if count_column is None:
+                # 数値列の最初の列を使用
+                numeric_cols = surgeon_summary.select_dtypes(include=['int64', 'float64']).columns
+                if len(numeric_cols) > 0:
+                    count_column = numeric_cols[0]
+                    logger.warning(f"件数列が見つからないため、{count_column}を使用")
+                else:
+                    st.warning("術者サマリーに件数データが含まれていません")
+                    return
+            
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
@@ -175,16 +192,16 @@ class SurgeonPage:
                 st.metric("👨‍⚕️ 総術者数", f"{total_surgeons}名")
             
             with col2:
-                total_cases = surgeon_summary['手術件数'].sum()
+                total_cases = surgeon_summary[count_column].sum()
                 st.metric("📊 総手術件数", f"{total_cases:,}件")
             
             with col3:
-                avg_cases = surgeon_summary['手術件数'].mean()
+                avg_cases = surgeon_summary[count_column].mean()
                 st.metric("📈 平均件数", f"{avg_cases:.1f}件/人")
             
             with col4:
                 if total_surgeons > 0:
-                    top_surgeon_cases = surgeon_summary.iloc[0]['手術件数']
+                    top_surgeon_cases = surgeon_summary.iloc[0][count_column]
                     st.metric("🏆 最多術者", f"{top_surgeon_cases}件")
                 else:
                     st.metric("🏆 最多術者", "0件")
@@ -195,11 +212,11 @@ class SurgeonPage:
                 
                 with col1:
                     # 件数分布
-                    high_volume = len(surgeon_summary[surgeon_summary['手術件数'] >= 10])
+                    high_volume = len(surgeon_summary[surgeon_summary[count_column] >= 10])
                     medium_volume = len(surgeon_summary[
-                        (surgeon_summary['手術件数'] >= 5) & (surgeon_summary['手術件数'] < 10)
+                        (surgeon_summary[count_column] >= 5) & (surgeon_summary[count_column] < 10)
                     ])
-                    low_volume = len(surgeon_summary[surgeon_summary['手術件数'] < 5])
+                    low_volume = len(surgeon_summary[surgeon_summary[count_column] < 5])
                     
                     st.write("**術者分布 (件数別):**")
                     st.write(f"• 高ボリューム (10件以上): {high_volume}名")
@@ -208,7 +225,7 @@ class SurgeonPage:
                 
                 with col2:
                     # 集中度分析
-                    top10_cases = surgeon_summary.head(10)['手術件数'].sum()
+                    top10_cases = surgeon_summary.head(10)[count_column].sum()
                     concentration_rate = (top10_cases / total_cases * 100) if total_cases > 0 else 0
                     
                     st.write("**手術件数集中度:**")
@@ -224,19 +241,52 @@ class SurgeonPage:
             
         except Exception as e:
             logger.error(f"術者サマリーメトリクス表示エラー: {e}")
-    
+
     @staticmethod
     def _render_top3_surgeons_detail(surgeon_summary: pd.DataFrame, 
-                                   expanded_df: pd.DataFrame) -> None:
+                                expanded_df: pd.DataFrame) -> None:
         """TOP3術者の詳細情報"""
         try:
             if len(surgeon_summary) >= 3:
                 st.subheader("🥇 TOP3術者 詳細")
                 
+                # 件数列の列名を特定
+                count_column = None
+                for col in ['手術件数', '件数', 'count', 'Count', 'surgery_count']:
+                    if col in surgeon_summary.columns:
+                        count_column = col
+                        break
+                
+                if count_column is None:
+                    numeric_cols = surgeon_summary.select_dtypes(include=['int64', 'float64']).columns
+                    if len(numeric_cols) > 0:
+                        count_column = numeric_cols[0]
+                
+                if count_column is None:
+                    st.warning("術者サマリーに件数データが含まれていません")
+                    return
+                
+                # 術者名列を特定
+                name_column = None
+                for col in ['術者名', '術者', 'surgeon', 'Surgeon', 'name']:
+                    if col in surgeon_summary.columns:
+                        name_column = col
+                        break
+                
+                if name_column is None:
+                    # 最初の文字列列を術者名として使用
+                    str_cols = surgeon_summary.select_dtypes(include=['object']).columns
+                    if len(str_cols) > 0:
+                        name_column = str_cols[0]
+                
+                if name_column is None:
+                    st.warning("術者名の列が見つかりません")
+                    return
+                
                 for i in range(min(3, len(surgeon_summary))):
                     surgeon_data = surgeon_summary.iloc[i]
-                    surgeon_name = surgeon_data['術者名']
-                    surgeon_cases = surgeon_data['手術件数']
+                    surgeon_name = surgeon_data[name_column]
+                    surgeon_cases = surgeon_data[count_column]
                     
                     # 該当術者のデータを取得
                     surgeon_expanded = expanded_df[expanded_df['術者名'] == surgeon_name]
@@ -274,7 +324,7 @@ class SurgeonPage:
                                     st.write(f"• 実施頻度: {frequency:.2f}件/日")
         
         except Exception as e:
-            logger.error(f"TOP3術者詳細表示エラー: {e}")
+        logger.error(f"TOP3術者詳細表示エラー: {e}")
     
     @staticmethod
     @safe_data_operation("診療科別分析表示")
@@ -312,10 +362,10 @@ class SurgeonPage:
         except Exception as e:
             st.error(f"診療科別分析エラー: {e}")
             logger.error(f"診療科別分析エラー: {e}")
-    
+
     @staticmethod
     def _render_all_departments_analysis(expanded_df: pd.DataFrame,
-                                       surgeon_summary: pd.DataFrame) -> None:
+                                    surgeon_summary: pd.DataFrame) -> None:
         """全診療科分析"""
         try:
             st.markdown("**🏥 診療科別サマリー**")
@@ -359,12 +409,37 @@ class SurgeonPage:
                 dept_surgeon_summary = surgeon.get_surgeon_summary(dept_data)
                 
                 if not dept_surgeon_summary.empty:
-                    top_surgeon = dept_surgeon_summary.iloc[0]
-                    top_surgeons_by_dept.append({
-                        '診療科': dept,
-                        'TOP術者': top_surgeon['術者名'],
-                        '件数': top_surgeon['手術件数']
-                    })
+                    # 件数列の列名を特定
+                    count_column = None
+                    for col in ['手術件数', '件数', 'count', 'Count', 'surgery_count']:
+                        if col in dept_surgeon_summary.columns:
+                            count_column = col
+                            break
+                    
+                    if count_column is None:
+                        numeric_cols = dept_surgeon_summary.select_dtypes(include=['int64', 'float64']).columns
+                        if len(numeric_cols) > 0:
+                            count_column = numeric_cols[0]
+                    
+                    # 術者名列を特定
+                    name_column = None
+                    for col in ['術者名', '術者', 'surgeon', 'Surgeon', 'name']:
+                        if col in dept_surgeon_summary.columns:
+                            name_column = col
+                            break
+                    
+                    if name_column is None:
+                        str_cols = dept_surgeon_summary.select_dtypes(include=['object']).columns
+                        if len(str_cols) > 0:
+                            name_column = str_cols[0]
+                    
+                    if count_column and name_column:
+                        top_surgeon = dept_surgeon_summary.iloc[0]
+                        top_surgeons_by_dept.append({
+                            '診療科': dept,
+                            'TOP術者': top_surgeon[name_column],
+                            '件数': top_surgeon[count_column]
+                        })
             
             if top_surgeons_by_dept:
                 top_surgeons_df = pd.DataFrame(top_surgeons_by_dept)
@@ -373,12 +448,12 @@ class SurgeonPage:
         except Exception as e:
             logger.error(f"全診療科分析エラー: {e}")
             st.error("全診療科分析でエラーが発生しました")
-    
+
     @staticmethod
     def _render_single_department_analysis(expanded_df: pd.DataFrame,
-                                         surgeon_summary: pd.DataFrame,
-                                         dept_name: str,
-                                         period_name: str) -> None:
+                                        surgeon_summary: pd.DataFrame,
+                                        dept_name: str,
+                                        period_name: str) -> None:
         """単一診療科分析"""
         try:
             st.markdown(f"**🩺 {dept_name} 術者分析**")
@@ -394,6 +469,21 @@ class SurgeonPage:
             dept_surgeon_summary = surgeon.get_surgeon_summary(dept_df)
             
             if not dept_surgeon_summary.empty:
+                # 件数列の列名を特定
+                count_column = None
+                for col in ['手術件数', '件数', 'count', 'Count', 'surgery_count']:
+                    if col in dept_surgeon_summary.columns:
+                        count_column = col
+                        break
+                
+                if count_column is None:
+                    numeric_cols = dept_surgeon_summary.select_dtypes(include=['int64', 'float64']).columns
+                    if len(numeric_cols) > 0:
+                        count_column = numeric_cols[0]
+                    else:
+                        st.warning("件数データが見つかりません")
+                        return
+                
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -409,11 +499,11 @@ class SurgeonPage:
                     # 診療科統計
                     st.write("**診療科統計:**")
                     st.metric("術者数", f"{len(dept_surgeon_summary)}名")
-                    st.metric("総手術件数", f"{dept_surgeon_summary['手術件数'].sum()}件")
-                    st.metric("平均件数/術者", f"{dept_surgeon_summary['手術件数'].mean():.1f}件")
+                    st.metric("総手術件数", f"{dept_surgeon_summary[count_column].sum()}件")
+                    st.metric("平均件数/術者", f"{dept_surgeon_summary[count_column].mean():.1f}件")
                     
                     if len(dept_surgeon_summary) > 0:
-                        top_surgeon_cases = dept_surgeon_summary.iloc[0]['手術件数']
+                        top_surgeon_cases = dept_surgeon_summary.iloc[0][count_column]
                         st.metric("TOP術者件数", f"{top_surgeon_cases}件")
                 
                 # 詳細テーブル
@@ -431,8 +521,8 @@ class SurgeonPage:
                 st.warning(f"{dept_name}の術者データを生成できませんでした")
                 
         except Exception as e:
-            logger.error(f"単一診療科分析エラー: {e}")
-            st.error("診療科分析でエラーが発生しました")
+        logger.error(f"単一診療科分析エラー: {e}")
+        st.error("診療科分析でエラーが発生しました")
     
     @staticmethod
     def _render_department_time_series(dept_df: pd.DataFrame, 
@@ -482,12 +572,12 @@ class SurgeonPage:
                     
         except Exception as e:
             logger.error(f"診療科時系列分析エラー: {e}")
-    
+
     @staticmethod
     @safe_data_operation("詳細統計表示")
     def _render_detailed_statistics_tab(surgeon_summary: pd.DataFrame,
-                                      expanded_df: pd.DataFrame,
-                                      period_name: str) -> None:
+                                    expanded_df: pd.DataFrame,
+                                    period_name: str) -> None:
         """詳細統計タブ"""
         st.subheader(f"📊 術者詳細統計 - {period_name}")
         
@@ -496,6 +586,21 @@ class SurgeonPage:
                 st.warning("統計分析用データがありません")
                 return
             
+            # 件数列の列名を特定
+            count_column = None
+            for col in ['手術件数', '件数', 'count', 'Count', 'surgery_count']:
+                if col in surgeon_summary.columns:
+                    count_column = col
+                    break
+            
+            if count_column is None:
+                numeric_cols = surgeon_summary.select_dtypes(include=['int64', 'float64']).columns
+                if len(numeric_cols) > 0:
+                    count_column = numeric_cols[0]
+                else:
+                    st.warning("件数データが見つかりません")
+                    return
+            
             # 統計分析
             col1, col2 = st.columns(2)
             
@@ -503,7 +608,7 @@ class SurgeonPage:
                 st.markdown("**📈 件数分布統計**")
                 
                 # 基本統計
-                stats = surgeon_summary['手術件数'].describe()
+                stats = surgeon_summary[count_column].describe()
                 for stat_name, value in stats.items():
                     st.write(f"• {stat_name}: {value:.1f}")
                 
@@ -511,7 +616,7 @@ class SurgeonPage:
                 percentiles = [90, 75, 50, 25, 10]
                 st.write("\n**パーセンタイル分析:**")
                 for p in percentiles:
-                    value = surgeon_summary['手術件数'].quantile(p/100)
+                    value = surgeon_summary[count_column].quantile(p/100)
                     st.write(f"• {p}パーセンタイル: {value:.1f}件")
             
             with col2:
@@ -520,10 +625,10 @@ class SurgeonPage:
                 # ヒストグラム
                 fig = px.histogram(
                     surgeon_summary,
-                    x='手術件数',
+                    x=count_column,
                     bins=20,
                     title="術者別手術件数分布",
-                    labels={'手術件数': '手術件数', 'count': '術者数'}
+                    labels={count_column: '手術件数', 'count': '術者数'}
                 )
                 st.plotly_chart(fig, use_container_width=True)
             
@@ -543,21 +648,36 @@ class SurgeonPage:
         except Exception as e:
             st.error(f"詳細統計表示エラー: {e}")
             logger.error(f"詳細統計表示エラー: {e}")
-    
+
     @staticmethod
     def _render_volume_category_analysis(surgeon_summary: pd.DataFrame) -> None:
         """件数区分別分析"""
         try:
+            # 件数列の列名を特定
+            count_column = None
+            for col in ['手術件数', '件数', 'count', 'Count', 'surgery_count']:
+                if col in surgeon_summary.columns:
+                    count_column = col
+                    break
+            
+            if count_column is None:
+                numeric_cols = surgeon_summary.select_dtypes(include=['int64', 'float64']).columns
+                if len(numeric_cols) > 0:
+                    count_column = numeric_cols[0]
+                else:
+                    st.warning("件数データが見つかりません")
+                    return
+            
             # 件数区分を定義
             categories = {
-                'ハイボリューム (20件以上)': surgeon_summary[surgeon_summary['手術件数'] >= 20],
+                'ハイボリューム (20件以上)': surgeon_summary[surgeon_summary[count_column] >= 20],
                 'ミドルボリューム (10-19件)': surgeon_summary[
-                    (surgeon_summary['手術件数'] >= 10) & (surgeon_summary['手術件数'] < 20)
+                    (surgeon_summary[count_column] >= 10) & (surgeon_summary[count_column] < 20)
                 ],
                 'ローボリューム (5-9件)': surgeon_summary[
-                    (surgeon_summary['手術件数'] >= 5) & (surgeon_summary['手術件数'] < 10)
+                    (surgeon_summary[count_column] >= 5) & (surgeon_summary[count_column] < 10)
                 ],
-                'ベリーロー (5件未満)': surgeon_summary[surgeon_summary['手術件数'] < 5]
+                'ベリーロー (5件未満)': surgeon_summary[surgeon_summary[count_column] < 5]
             }
             
             st.markdown("**📊 ボリューム区分別分析**")
@@ -569,8 +689,8 @@ class SurgeonPage:
                     category_summary.append({
                         '区分': category_name,
                         '術者数': len(category_data),
-                        '総件数': category_data['手術件数'].sum(),
-                        '平均件数': category_data['手術件数'].mean(),
+                        '総件数': category_data[count_column].sum(),
+                        '平均件数': category_data[count_column].mean(),
                         '割合': f"{len(category_data) / len(surgeon_summary) * 100:.1f}%"
                     })
             
@@ -628,20 +748,35 @@ class SurgeonPage:
                 
         except Exception as e:
             logger.error(f"診療科横断分析エラー: {e}")
-    
+
     @staticmethod
     def _render_performance_indicators(surgeon_summary: pd.DataFrame, 
-                                     expanded_df: pd.DataFrame) -> None:
+                                    expanded_df: pd.DataFrame) -> None:
         """パフォーマンス指標"""
         try:
             st.markdown("**📈 パフォーマンス指標**")
+            
+            # 件数列の列名を特定
+            count_column = None
+            for col in ['手術件数', '件数', 'count', 'Count', 'surgery_count']:
+                if col in surgeon_summary.columns:
+                    count_column = col
+                    break
+            
+            if count_column is None:
+                numeric_cols = surgeon_summary.select_dtypes(include=['int64', 'float64']).columns
+                if len(numeric_cols) > 0:
+                    count_column = numeric_cols[0]
+                else:
+                    st.warning("件数データが見つかりません")
+                    return
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 # 集中度指標（ジニ係数的な）
-                total_cases = surgeon_summary['手術件数'].sum()
-                sorted_cases = surgeon_summary['手術件数'].sort_values(ascending=False)
+                total_cases = surgeon_summary[count_column].sum()
+                sorted_cases = surgeon_summary[count_column].sort_values(ascending=False)
                 
                 # TOP10%の術者が実施する手術の割合
                 top10_percent_count = max(1, len(surgeon_summary) // 10)
@@ -659,7 +794,7 @@ class SurgeonPage:
             
             with col2:
                 # 活動レベル指標
-                active_surgeons = len(surgeon_summary[surgeon_summary['手術件数'] >= 5])
+                active_surgeons = len(surgeon_summary[surgeon_summary[count_column] >= 5])
                 activity_rate = (active_surgeons / len(surgeon_summary) * 100) if len(surgeon_summary) > 0 else 0
                 
                 st.metric("活発術者率", f"{activity_rate:.1f}%")
@@ -675,8 +810,8 @@ class SurgeonPage:
                 else:
                     st.metric("平日手術比率", "N/A")
                     
-        except Exception as e:
-            logger.error(f"パフォーマンス指標表示エラー: {e}")
+    except Exception as e:
+        logger.error(f"パフォーマンス指標表示エラー: {e}")
     
     @staticmethod
     def _render_period_comparison_tab(current_period_name: str) -> None:
@@ -722,15 +857,28 @@ class SurgeonPage:
         except Exception as e:
             st.error(f"期間比較エラー: {e}")
             logger.error(f"術者期間比較エラー: {e}")
-    
+
     @staticmethod
     def _perform_surgeon_period_comparison(current_period: str,
-                                         compare_period: str,
-                                         compare_surgeon_summary: pd.DataFrame,
-                                         compare_expanded: pd.DataFrame) -> None:
+                                        compare_period: str,
+                                        compare_surgeon_summary: pd.DataFrame,
+                                        compare_expanded: pd.DataFrame) -> None:
         """術者期間比較分析を実行"""
         try:
             st.markdown("**📊 期間比較結果**")
+            
+            # 件数列の列名を特定
+            count_column = None
+            if not compare_surgeon_summary.empty:
+                for col in ['手術件数', '件数', 'count', 'Count', 'surgery_count']:
+                    if col in compare_surgeon_summary.columns:
+                        count_column = col
+                        break
+                
+                if count_column is None:
+                    numeric_cols = compare_surgeon_summary.select_dtypes(include=['int64', 'float64']).columns
+                    if len(numeric_cols) > 0:
+                        count_column = numeric_cols[0]
             
             col1, col2 = st.columns(2)
             
@@ -743,8 +891,12 @@ class SurgeonPage:
                 
                 # 比較期間の基本統計
                 compare_total_surgeons = len(compare_surgeon_summary)
-                compare_total_cases = compare_surgeon_summary['手術件数'].sum() if not compare_surgeon_summary.empty else 0
-                compare_avg_cases = compare_surgeon_summary['手術件数'].mean() if not compare_surgeon_summary.empty else 0
+                compare_total_cases = 0
+                compare_avg_cases = 0
+                
+                if count_column and not compare_surgeon_summary.empty:
+                    compare_total_cases = compare_surgeon_summary[count_column].sum()
+                    compare_avg_cases = compare_surgeon_summary[count_column].mean()
                 
                 st.metric("術者数", f"{compare_total_surgeons}名")
                 st.metric("総手術件数", f"{compare_total_cases}件")
