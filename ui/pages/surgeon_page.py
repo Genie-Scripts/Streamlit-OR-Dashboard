@@ -322,7 +322,6 @@ class SurgeonPage:
                                     ).days + 1
                                     frequency = len(surgeon_expanded) / date_range if date_range > 0 else 0
                                     st.write(f"• 実施頻度: {frequency:.2f}件/日")
-        
         except Exception as e:
         logger.error(f"TOP3術者詳細表示エラー: {e}")
     
