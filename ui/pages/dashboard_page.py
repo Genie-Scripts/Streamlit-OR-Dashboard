@@ -1307,7 +1307,7 @@ class DashboardPage:
                     recent_week_cases = 0
                 
                 # 達成率計算
-                achievement_rate = (weekly_avg / target_weekly * 100) if target_weekly > 0 else 0
+                achievement_rate = (recent_week_cases / target_weekly * 100) if target_weekly > 0 else 0
                 
                 dept_summary.append({
                     '診療科': dept,
