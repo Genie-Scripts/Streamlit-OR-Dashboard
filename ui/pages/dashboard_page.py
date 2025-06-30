@@ -637,13 +637,15 @@ class DashboardPage:
                         else:
                             period_label = "全期間"
                         
-                        csv_data = sorted_perf.to_csv(index=False, encoding='utf-8-sig')
+                        # CSVデータの準備（日本語対応）
+                        csv_string = sorted_perf.to_csv(index=False)
+                        csv_data = '\ufeff' + csv_string  # BOM付きUTF-8
                         
                         st.download_button(
                             label="📥 CSVダウンロード",
-                            data=csv_data,
+                            data=csv_data.encode('utf-8'),
                             file_name=f"診療科別パフォーマンス_{period_label}_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime="text/csv",
+                            mime="text/csv; charset=utf-8",
                             help="診療科別パフォーマンスデータをCSVファイルとしてダウンロード",
                             use_container_width=True
                         )
@@ -1281,19 +1283,15 @@ class DashboardPage:
                         st.dataframe(sorted_perf, use_container_width=True)
                     
                     with col2:
-                        # CSVデータの準備
-                        if start_date and end_date:
-                            period_label = f"{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
-                        else:
-                            period_label = "全期間"
-                        
-                        csv_data = sorted_perf.to_csv(index=False, encoding='utf-8-sig')
+                        # CSVデータの準備（日本語対応）
+                        csv_string = sorted_perf.to_csv(index=False)
+                        csv_data = '\ufeff' + csv_string  # BOM付きUTF-8
                         
                         st.download_button(
                             label="📥 CSVダウンロード",
-                            data=csv_data,
+                            data=csv_data.encode('utf-8'),
                             file_name=f"診療科別パフォーマンス_{period_label}_{datetime.now().strftime('%Y%m%d')}.csv",
-                            mime="text/csv",
+                            mime="text/csv; charset=utf-8",
                             help="診療科別パフォーマンスデータをCSVファイルとしてダウンロード",
                             use_container_width=True
                         )
