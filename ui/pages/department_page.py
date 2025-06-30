@@ -1,9 +1,8 @@
-# ui/pages/department_page.py
+# ui/pages/department_page.py (修正後)
 """
 診療科別分析ページモジュール
 特定診療科の詳細分析を表示
 """
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -12,13 +11,10 @@ import logging
 
 from ui.session_manager import SessionManager
 from ui.error_handler import safe_streamlit_operation, safe_data_operation
-
-# 既存の分析モジュールをインポート
-from analysis import weekly, ranking, surgeon
+from analysis import weekly, surgeon
 from plotting import trend_plots, generic_plots
 
 logger = logging.getLogger(__name__)
-
 
 class DepartmentPage:
     """診療科別分析ページクラス"""
@@ -31,7 +27,7 @@ class DepartmentPage:
         
         # データ取得
         df = SessionManager.get_processed_df()
-        target_dict = SessionManager.get_target_dict()
+        target_df = SessionManager.get_target_df() # ← target_df を取得
         latest_date = SessionManager.get_latest_date()
         
         # 診療科選択
@@ -39,110 +35,87 @@ class DepartmentPage:
         if not selected_dept:
             return
         
-        # 選択された診療科のデータを抽出
         dept_df = df[df['実施診療科'] == selected_dept]
         
         # KPI表示
         DepartmentPage._render_department_kpi(dept_df, latest_date, selected_dept)
         
-        # 週次推移
-        DepartmentPage._render_department_trend(df, target_dict, selected_dept)
+        # 週次推移 (target_df を渡すように変更)
+        DepartmentPage._render_department_trend(df, target_df, selected_dept)
         
         # 詳細分析タブ
         DepartmentPage._render_detailed_analysis_tabs(dept_df, selected_dept)
-    
+
     @staticmethod
     def _render_department_selector(df: pd.DataFrame) -> Optional[str]:
         """診療科選択UI"""
         departments = sorted(df["実施診療科"].dropna().unique())
-        
         if not departments:
             st.warning("データに診療科情報がありません。")
             return None
-        
-        selected_dept = st.selectbox(
-            "分析する診療科を選択",
-            departments,
-            help="分析対象の診療科を選択してください"
-        )
-        
-        return selected_dept
-    
+        return st.selectbox("分析する診療科を選択", departments)
+
     @staticmethod
     @safe_data_operation("診療科KPI計算")
-    def _render_department_kpi(dept_df: pd.DataFrame, latest_date: Optional[pd.Timestamp], 
-                              dept_name: str) -> None:
+    def _render_department_kpi(dept_df: pd.DataFrame, latest_date: Optional[pd.Timestamp], dept_name: str):
         """診療科別KPI表示"""
-        try:
-            kpi_summary = ranking.get_kpi_summary(dept_df, latest_date)
-            
-            # KPI表示
-            generic_plots.display_kpi_metrics(kpi_summary)
-            
-        except Exception as e:
-            st.error(f"KPI計算エラー: {e}")
-            logger.error(f"診療科別KPI計算エラー ({dept_name}): {e}")
-    
+        kpi_summary = ranking.get_kpi_summary(dept_df, latest_date)
+        generic_plots.display_kpi_metrics(kpi_summary)
+
     @staticmethod
     @safe_data_operation("診療科別週次推移表示")
-    def _render_department_trend(df: pd.DataFrame, target_dict: Dict[str, Any], 
-                               dept_name: str) -> None:
-        """診療科別週次推移表示"""
+    def _render_department_trend(df: pd.DataFrame, target_df: pd.DataFrame, dept_name: str) -> None:
+        """診療科別週次推移表示 (target_df対応版)"""
         st.markdown("---")
         st.subheader(f"📈 {dept_name} 週次推移")
         
-        try:
-            # 完全週データオプション
-            use_complete_weeks = st.toggle(
-                "完全週データ", 
-                True, 
-                help="週の途中のデータを除外し、完全な週単位で分析します"
-            )
+        use_complete_weeks = st.toggle("完全週データのみで分析", True, help="週の途中のデータを除外し、完全な週単位で分析します")
+        
+        summary = weekly.get_summary(df, department=dept_name, use_complete_weeks=use_complete_weeks)
+        
+        if not summary.empty:
+            # グラフ描画関数に target_df を渡す
+            fig = trend_plots.create_weekly_dept_chart(summary, dept_name, target_df)
+            st.plotly_chart(fig, use_container_width=True)
             
-            summary = weekly.get_summary(
-                df, 
-                department=dept_name, 
-                use_complete_weeks=use_complete_weeks
-            )
-            
-            if not summary.empty:
-                fig = trend_plots.create_weekly_dept_chart(summary, dept_name, target_dict)
-                st.plotly_chart(fig, use_container_width=True)
+            with st.expander("📊 統計サマリー"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write("**基本統計:**")
+                    st.write(f"• 分析週数: {len(summary)}週")
+                    st.write(f"• 最大値: {summary['週合計件数'].max():.0f}件/週")
+                    st.write(f"• 最小値: {summary['週合計件数'].min():.0f}件/週")
+                    st.write(f"• 平均値: {summary['週合計件数'].mean():.1f}件/週")
                 
-                # 統計情報
-                with st.expander("📊 統計サマリー"):
-                    col1, col2 = st.columns(2)
+                with col2:
+                    st.write("**目標との比較:**")
                     
-                    with col1:
-                        st.write("**基本統計:**")
-                        st.write(f"• 分析週数: {len(summary)}週")
-                        st.write(f"• 最大値: {summary['週合計件数'].max():.0f}件/週")
-                        st.write(f"• 最小値: {summary['週合計件数'].min():.0f}件/週")
-                        st.write(f"• 平均値: {summary['週合計件数'].mean():.1f}件/週")
+                    # DataFrameから該当の目標値を取得
+                    # メトリック名は'weekly_total_cases'など、目標設定ファイルで定義したものを使用
+                    target_series = target_df[
+                        (target_df['target_type'] == 'department') &
+                        (target_df['code'] == dept_name) &
+                        (target_df['metric'] == 'weekly_total_cases') # ← metric名は要確認
+                    ]['value']
                     
-                    with col2:
-                        st.write("**目標との比較:**")
-                        target_value = target_dict.get(dept_name)
-                        if target_value:
-                            avg_actual = summary['週合計件数'].mean()
-                            achievement_rate = (avg_actual / target_value) * 100
-                            st.write(f"• 目標値: {target_value:.1f}件/週")
-                            st.write(f"• 平均達成率: {achievement_rate:.1f}%")
-                            
-                            if achievement_rate >= 100:
-                                st.success(f"🎯 目標達成！")
-                            else:
-                                shortfall = target_value - avg_actual
-                                st.warning(f"⚠️ 目標まで {shortfall:.1f}件/週不足")
+                    target_value = target_series.iloc[0] if not target_series.empty else None
+
+                    if target_value:
+                        avg_actual = summary['週合計件数'].mean()
+                        achievement_rate = (avg_actual / target_value) * 100 if target_value > 0 else 0
+                        st.write(f"• 目標値: {target_value:.1f}件/週")
+                        st.write(f"• 平均達成率: {achievement_rate:.1f}%")
+                        
+                        if achievement_rate >= 100:
+                            st.success("🎯 目標達成！")
                         else:
-                            st.info("この診療科の目標値は設定されていません")
-            else:
-                st.warning(f"{dept_name}の週次データがありません")
-                
-        except Exception as e:
-            st.error(f"週次推移分析エラー: {e}")
-            logger.error(f"診療科別週次推移エラー ({dept_name}): {e}")
-    
+                            shortfall = target_value - avg_actual
+                            st.warning(f"⚠️ 目標まで {shortfall:.1f}件/週不足")
+                    else:
+                        st.info("この診療科の週次目標は設定されていません")
+        else:
+            st.warning(f"{dept_name}の週次データがありません")
+            
     @staticmethod
     def _render_detailed_analysis_tabs(dept_df: pd.DataFrame, dept_name: str) -> None:
         """詳細分析タブを表示"""
