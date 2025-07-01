@@ -624,7 +624,31 @@ class DashboardPage:
                 
                 # 詳細データテーブル
                 with st.expander("📋 詳細データテーブル"):
-                    st.dataframe(sorted_perf, use_container_width=True)
+                    # CSVダウンロードボタン
+                    col1, col2 = st.columns([3, 1])
+                    
+                    with col1:
+                        st.dataframe(sorted_perf, use_container_width=True)
+                    
+                    with col2:
+                        # CSVデータの準備
+                        if start_date and end_date:
+                            period_label = f"{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
+                        else:
+                            period_label = "全期間"
+                        
+                        # CSVデータの準備（日本語対応）
+                        csv_string = sorted_perf.to_csv(index=False)
+                        csv_data = '\ufeff' + csv_string  # BOM付きUTF-8
+                        
+                        st.download_button(
+                            label="📥 CSVダウンロード",
+                            data=csv_data.encode('utf-8'),
+                            file_name=f"診療科別パフォーマンス_{period_label}_{datetime.now().strftime('%Y%m%d')}.csv",
+                            mime="text/csv; charset=utf-8",
+                            help="診療科別パフォーマンスデータをCSVファイルとしてダウンロード",
+                            use_container_width=True
+                        )
                 
                 return sorted_perf
             else:
@@ -1252,7 +1276,25 @@ class DashboardPage:
                 
                 # 詳細データテーブル
                 with st.expander("📋 詳細データテーブル"):
-                    st.dataframe(sorted_perf, use_container_width=True)
+                    # CSVダウンロードボタン
+                    col1, col2 = st.columns([3, 1])
+                    
+                    with col1:
+                        st.dataframe(sorted_perf, use_container_width=True)
+                    
+                    with col2:
+                        # CSVデータの準備（日本語対応）
+                        csv_string = sorted_perf.to_csv(index=False)
+                        csv_data = '\ufeff' + csv_string  # BOM付きUTF-8
+                        
+                        st.download_button(
+                            label="📥 CSVダウンロード",
+                            data=csv_data.encode('utf-8'),
+                            file_name=f"診療科別パフォーマンス_{period_label}_{datetime.now().strftime('%Y%m%d')}.csv",
+                            mime="text/csv; charset=utf-8",
+                            help="診療科別パフォーマンスデータをCSVファイルとしてダウンロード",
+                            use_container_width=True
+                        )
             else:
                 st.info("診療科別パフォーマンスを計算する十分なデータがありません。")
                 
@@ -1306,8 +1348,8 @@ class DashboardPage:
                 else:
                     recent_week_cases = 0
                 
-                # 達成率計算
-                achievement_rate = (weekly_avg / target_weekly * 100) if target_weekly > 0 else 0
+                # 達成率計算（直近週ベース）
+                achievement_rate = (recent_week_cases / target_weekly * 100) if target_weekly > 0 else 0
                 
                 dept_summary.append({
                     '診療科': dept,
