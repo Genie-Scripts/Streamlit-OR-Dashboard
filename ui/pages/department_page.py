@@ -147,13 +147,13 @@ class DepartmentPage:
             f"📅 分析期間: {period_info['start_date']} ～ {period_info['end_date']} "
             f"（平日{period_info['weekdays']}日間）"
         )
-    
+
     @staticmethod
     @safe_data_operation("診療科KPI計算")
     def _render_department_kpi(dept_df: pd.DataFrame, 
-                              start_date: Optional[pd.Timestamp],
-                              end_date: Optional[pd.Timestamp],
-                              dept_name: str) -> None:
+                            start_date: Optional[pd.Timestamp],
+                            end_date: Optional[pd.Timestamp],
+                            dept_name: str) -> None:
         """診療科別KPI表示"""
         try:
             st.subheader(f"📊 {dept_name} 主要指標")
@@ -161,16 +161,15 @@ class DepartmentPage:
             # 基本統計
             total_cases = len(dept_df)
             gas_cases = len(dept_df[dept_df['is_gas_20min']]) if 'is_gas_20min' in dept_df.columns else total_cases
-            weekday_cases = len(dept_df[dept_df['is_weekday']]) if 'is_weekday' in dept_df.columns else gas_cases
             
+            # 期間中の週数を計算
             if start_date and end_date:
-                weekdays = PeriodSelector.calculate_weekdays_in_period(start_date, end_date)
-                daily_avg = weekday_cases / weekdays if weekdays > 0 else 0
+                weeks_in_period = (end_date - start_date).days / 7
+                weekly_avg = gas_cases / weeks_in_period if weeks_in_period > 0 else 0
             else:
-                weekdays = 0
-                daily_avg = 0
-            
-            col1, col2, col3, col4 = st.columns(4)
+                weekly_avg = 0
+
+            col1, col2, col3 = st.columns(3)  # 4列から3列に変更
             
             with col1:
                 st.metric("📊 全手術件数", f"{total_cases:,}件")
@@ -179,9 +178,6 @@ class DepartmentPage:
                 st.metric("🔴 全身麻酔20分以上", f"{gas_cases:,}件")
             
             with col3:
-                st.metric("📈 平日1日平均", f"{daily_avg:.1f}件/日")
-            
-            with col4:
                 gas_ratio = (gas_cases / total_cases * 100) if total_cases > 0 else 0
                 st.metric("🎯 全身麻酔比率", f"{gas_ratio:.1f}%")
             
@@ -189,9 +185,10 @@ class DepartmentPage:
             target_dict = SessionManager.get_target_dict()
             target_value = target_dict.get(dept_name)
             
-            if target_value and weekdays > 0:
-                # 週次目標を日次に変換
-                weekly_avg = (gas_cases / weekdays * 7) if weekdays > 0 else 0
+            if target_value and start_date and end_date:
+                # 期間中の週数を計算
+                weeks_in_period = (end_date - start_date).days / 7
+                weekly_avg = gas_cases / weeks_in_period if weeks_in_period > 0 else 0
                 achievement_rate = (weekly_avg / target_value * 100) if target_value > 0 else 0
                 
                 col1, col2, col3 = st.columns(3)
@@ -205,7 +202,7 @@ class DepartmentPage:
                 with col3:
                     color = "🟢" if achievement_rate >= 100 else "🟡" if achievement_rate >= 80 else "🔴"
                     st.metric("📊 達成率", f"{achievement_rate:.1f}%", 
-                             delta=f"{achievement_rate - 100:.1f}%" if achievement_rate != 100 else "目標達成")
+                            delta=f"{achievement_rate - 100:.1f}%" if achievement_rate != 100 else "目標達成")
                 
                 if achievement_rate >= 100:
                     st.success(f"🎉 {dept_name}は目標を達成しています！")
