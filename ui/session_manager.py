@@ -1,7 +1,7 @@
-# ui/session_manager.py (期間選択機能追加版)
+# ui/session_manager.py (分析基準日管理機能追加版)
 """
 セッション状態管理モジュール
-アプリケーションのセッション状態を一元管理（期間選択機能追加）
+アプリケーションのセッション状態を一元管理
 """
 
 import streamlit as st
@@ -27,9 +27,10 @@ class SessionManager:
         'data_loaded_from_file': 'data_loaded_from_file',
         'data_source': 'data_source',
         'auto_load_attempted': 'auto_load_attempted',
+        'analysis_base_date': 'analysis_base_date',  # <-- 修正点 1: キーの追加
         # 期間選択関連
-        'period_selections': 'period_selections',  # ページごとの期間選択状態
-        'period_cache': 'period_cache'  # 期間別フィルタデータキャッシュ
+        'period_selections': 'period_selections',
+        'period_cache': 'period_cache'
     }
     
     @staticmethod
@@ -54,6 +55,10 @@ class SessionManager:
             
             if SessionManager.SESSION_KEYS['data_source'] not in st.session_state:
                 st.session_state[SessionManager.SESSION_KEYS['data_source']] = 'unknown'
+
+            # <-- 修正点 2: 分析基準日の初期化
+            if SessionManager.SESSION_KEYS['analysis_base_date'] not in st.session_state:
+                st.session_state[SessionManager.SESSION_KEYS['analysis_base_date']] = None
             
             # 期間選択関連の初期化
             if SessionManager.SESSION_KEYS['period_selections'] not in st.session_state:
@@ -70,6 +75,7 @@ class SessionManager:
             logger.error(f"セッション状態初期化エラー: {e}")
             st.error(f"セッション初期化に失敗しました: {e}")
 
+    # ... ( _attempt_auto_load は変更なし) ...
     @staticmethod
     def _attempt_auto_load() -> None:
         """自動データ読み込みを試行"""
@@ -156,6 +162,18 @@ class SessionManager:
         """データソースを設定"""
         st.session_state[SessionManager.SESSION_KEYS['data_source']] = source
 
+    # <-- 修正点 3: ゲッターとセッターの追加
+    @staticmethod
+    def get_analysis_base_date() -> Optional[datetime]:
+        """分析基準日を取得"""
+        return st.session_state.get(SessionManager.SESSION_KEYS['analysis_base_date'])
+
+    @staticmethod
+    def set_analysis_base_date(date: datetime) -> None:
+        """分析基準日を設定"""
+        st.session_state[SessionManager.SESSION_KEYS['analysis_base_date']] = date
+    
+    # ... (以降のコードは変更なし) ...
     # === 期間選択管理メソッド ===
     @staticmethod
     def get_period_selection(page_name: str) -> str:

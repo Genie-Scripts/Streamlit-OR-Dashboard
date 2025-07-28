@@ -121,19 +121,30 @@ class DashboardPage:
     @staticmethod
     def _calculate_period_dates(period: str, latest_date: Optional[pd.Timestamp]) -> Tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
         """選択された期間に基づいて開始日・終了日を計算"""
-        if not latest_date:
+
+        # ★★★ ここから修正 ★★★
+        # セッションから分析基準日を取得
+        analysis_base_date = SessionManager.get_analysis_base_date()
+
+        # 基準日が設定されていなければ、データ内の最新日をフォールバックとして使用
+        if analysis_base_date is None:
+            analysis_base_date = latest_date
+
+        if not analysis_base_date:
             return None, None
-        
+        # ★★★ ここまで修正 ★★★
+
         try:
             # 週単位分析の場合は分析終了日（日曜日）を使用
             if "週" in period:
-                analysis_end_date = weekly.get_analysis_end_date(latest_date)
+                # 修正した `analysis_base_date` を渡す
+                analysis_end_date = weekly.get_analysis_end_date(analysis_base_date)
                 if not analysis_end_date:
                     return None, None
                 end_date = analysis_end_date
             else:
-                end_date = latest_date
-            
+                end_date = analysis_base_date # 週単位でなければ基準日をそのまま使う
+
             if period == "直近4週":
                 start_date = end_date - pd.Timedelta(days=27)
             elif period == "直近8週":

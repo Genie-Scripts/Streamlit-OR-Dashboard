@@ -123,6 +123,30 @@ class SidebarManager:
             st.info("🎯 目標データ未設定")
 
     @staticmethod
+    def _render_analysis_settings() -> None:
+        """分析設定セクションを描画"""
+        st.subheader("⚙️ 分析設定")
+
+        # セッションから現在の日付を取得、なければ今日の日付
+        base_date_val = SessionManager.get_analysis_base_date()
+        if base_date_val is None:
+            base_date_val = datetime.now().date()
+
+        # 日付入力ウィジェットを配置
+        selected_date = st.date_input(
+            "分析基準日",
+            value=base_date_val,
+            help="分析期間を計算する際の基準日です。データがない日も考慮して、分析したい時点の日付を選択してください。"
+        )
+
+        # 選択された日付をセッションに保存
+        if selected_date:
+            SessionManager.set_analysis_base_date(pd.to_datetime(selected_date))
+
+        st.markdown("---")
+
+
+    @staticmethod
     def _render_navigation() -> None:
         """ナビゲーション部分を描画"""
         st.subheader("📍 ナビゲーション")
