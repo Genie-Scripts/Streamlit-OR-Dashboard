@@ -5,6 +5,7 @@
 """
 
 import streamlit as st
+import pandas as pd  # <--- 修正点
 import pytz
 from datetime import datetime
 from typing import List, Optional
