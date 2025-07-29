@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Tuple
 import base64
 import requests
 import json
+from ui.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -2713,7 +2714,6 @@ jobs:
         """公開URLを取得"""
         return f"https://{self.repo_owner}.github.io/{self.repo_name}/"
 
-
 def create_surgery_github_publisher_interface():
     """手術分析GitHub公開インターフェース（4タブ手術分析ダッシュボード版）"""
     try:
@@ -2771,7 +2771,7 @@ def create_surgery_github_publisher_interface():
             index=2,
             key="surgery_publish_period"
         )
-        
+
         # 接続テスト
         if st.sidebar.button("🔌 接続テスト", key="test_connection"):
             if github_token and repo_owner and repo_name:
@@ -2783,7 +2783,7 @@ def create_surgery_github_publisher_interface():
                     st.sidebar.error(f"❌ {message}")
             else:
                 st.sidebar.error("すべての項目を入力してください")
-        
+
         # 公開実行
         st.sidebar.markdown("**📤 手術分析ダッシュボード公開**")
         st.sidebar.info("🏥 病院全体手術サマリ（年度比較付き）\n🏆 ハイスコア TOP3\n📊 診療科別パフォーマンス\n📈 詳細分析")
@@ -2799,14 +2799,23 @@ def create_surgery_github_publisher_interface():
                         github_token, repo_owner, repo_name, branch
                     )
                     
+                    # SessionManagerから共通の分析基準日を取得
+                    analysis_base_date = SessionManager.get_analysis_base_date()
+
+                    # 基準日が設定されていない場合は、データ内の最新日をフォールバックとして使用
+                    if analysis_base_date is None and not df.empty:
+                        analysis_base_date = df['手術実施日_dt'].max()
+                    
+                    if analysis_base_date is None:
+                        st.sidebar.error("分析基準日が設定されていません。")
+                        return
+
                     success, message = publisher.publish_surgery_dashboard(
-                        df, target_dict, period, "integrated_dashboard"
+                        df, target_dict, period, "integrated_dashboard", analysis_base_date
                     )
                     
                     if success:
                         st.sidebar.success(f"✅ {message}")
-                        
-                        # 設定を保存
                         save_github_settings(repo_owner, repo_name, branch)
                     else:
                         st.sidebar.error(f"❌ {message}")
