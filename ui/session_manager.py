@@ -27,9 +27,10 @@ class SessionManager:
         'data_loaded_from_file': 'data_loaded_from_file',
         'data_source': 'data_source',
         'auto_load_attempted': 'auto_load_attempted',
+        'analysis_base_date': 'analysis_base_date', # <--- 修正
         # 期間選択関連
-        'period_selections': 'period_selections',  # ページごとの期間選択状態
-        'period_cache': 'period_cache'  # 期間別フィルタデータキャッシュ
+        'period_selections': 'period_selections',
+        'period_cache': 'period_cache'
     }
     
     @staticmethod
@@ -54,6 +55,11 @@ class SessionManager:
             
             if SessionManager.SESSION_KEYS['data_source'] not in st.session_state:
                 st.session_state[SessionManager.SESSION_KEYS['data_source']] = 'unknown'
+
+            # === ▼▼▼ 修正箇所 ▼▼▼ ===
+            if SessionManager.SESSION_KEYS['analysis_base_date'] not in st.session_state:
+                st.session_state[SessionManager.SESSION_KEYS['analysis_base_date']] = None
+            # === ▲▲▲ 修正箇所 ▲▲▲ ===
             
             # 期間選択関連の初期化
             if SessionManager.SESSION_KEYS['period_selections'] not in st.session_state:
@@ -80,7 +86,6 @@ class SessionManager:
                 st.session_state[SessionManager.SESSION_KEYS['data_loaded_from_file']] = True
                 st.session_state[SessionManager.SESSION_KEYS['data_source']] = 'auto_loaded'
                 
-                # データがロードされた場合、セッション変数を更新
                 df = st.session_state.get('df')
                 target_data = st.session_state.get('target_data')
                 
@@ -98,97 +103,84 @@ class SessionManager:
         except Exception as e:
             logger.error(f"自動データ読み込みエラー: {e}")
 
-    # === 基本データ管理メソッド ===
     @staticmethod
     def get_processed_df() -> pd.DataFrame:
-        """処理済みデータフレームを取得"""
         return st.session_state.get(SessionManager.SESSION_KEYS['processed_df'], pd.DataFrame())
     
     @staticmethod
     def set_processed_df(df: pd.DataFrame) -> None:
-        """処理済みデータフレームを設定"""
         st.session_state[SessionManager.SESSION_KEYS['processed_df']] = df
-        
-        # 最新日付も更新
         if not df.empty and '手術実施日_dt' in df.columns:
             st.session_state[SessionManager.SESSION_KEYS['latest_date']] = df['手術実施日_dt'].max()
-        
-        # データが更新されたらキャッシュをクリア
         SessionManager.clear_period_cache()
 
     @staticmethod
     def get_target_dict() -> Dict[str, Any]:
-        """目標辞書を取得"""
         return st.session_state.get(SessionManager.SESSION_KEYS['target_dict'], {})
     
     @staticmethod
     def set_target_dict(target_dict: Dict[str, Any]) -> None:
-        """目標辞書を設定"""
         st.session_state[SessionManager.SESSION_KEYS['target_dict']] = target_dict
 
     @staticmethod
     def get_latest_date() -> Optional[datetime]:
-        """最新日付を取得"""
         return st.session_state.get(SessionManager.SESSION_KEYS['latest_date'])
     
     @staticmethod
     def set_latest_date(date: datetime) -> None:
-        """最新日付を設定"""
         st.session_state[SessionManager.SESSION_KEYS['latest_date']] = date
 
     @staticmethod
     def get_current_view() -> str:
-        """現在のビューを取得"""
         return st.session_state.get(SessionManager.SESSION_KEYS['current_view'], 'ダッシュボード')
     
     @staticmethod
     def set_current_view(view: str) -> None:
-        """現在のビューを設定"""
         st.session_state[SessionManager.SESSION_KEYS['current_view']] = view
 
     @staticmethod
     def get_data_source() -> str:
-        """データソースを取得"""
         return st.session_state.get(SessionManager.SESSION_KEYS['data_source'], 'unknown')
     
     @staticmethod
     def set_data_source(source: str) -> None:
-        """データソースを設定"""
         st.session_state[SessionManager.SESSION_KEYS['data_source']] = source
 
-    # === 期間選択管理メソッド ===
+    # === ▼▼▼ 修正箇所 ▼▼▼ ===
+    @staticmethod
+    def get_analysis_base_date() -> Optional[datetime]:
+        """分析基準日を取得"""
+        return st.session_state.get(SessionManager.SESSION_KEYS['analysis_base_date'])
+
+    @staticmethod
+    def set_analysis_base_date(date: datetime) -> None:
+        """分析基準日を設定"""
+        st.session_state[SessionManager.SESSION_KEYS['analysis_base_date']] = date
+    # === ▲▲▲ 修正箇所 ▲▲▲ ===
+
     @staticmethod
     def get_period_selection(page_name: str) -> str:
-        """指定ページの期間選択を取得"""
         period_selections = st.session_state.get(SessionManager.SESSION_KEYS['period_selections'], {})
         return period_selections.get(page_name, "直近4週")
     
     @staticmethod
     def set_period_selection(page_name: str, period: str) -> None:
-        """指定ページの期間選択を設定"""
         period_selections = st.session_state.get(SessionManager.SESSION_KEYS['period_selections'], {})
         period_selections[page_name] = period
         st.session_state[SessionManager.SESSION_KEYS['period_selections']] = period_selections
-        
-        # 期間が変更されたらそのページのキャッシュをクリア
         SessionManager.clear_period_cache(page_name)
     
     @staticmethod
     def get_filtered_data(page_name: str, 
                          start_date: Optional[pd.Timestamp], 
                          end_date: Optional[pd.Timestamp]) -> pd.DataFrame:
-        """期間フィルタ済みデータを取得（キャッシュ対応）"""
         try:
-            # キャッシュキーを生成
             cache_key = f"{page_name}_{start_date}_{end_date}"
             period_cache = st.session_state.get(SessionManager.SESSION_KEYS['period_cache'], {})
             
-            # キャッシュにあるかチェック
             if cache_key in period_cache:
-                logger.debug(f"期間フィルタデータをキャッシュから取得: {cache_key}")
                 return period_cache[cache_key]
             
-            # キャッシュにない場合は新規計算
             df = SessionManager.get_processed_df()
             
             if df.empty or start_date is None or end_date is None:
@@ -199,11 +191,8 @@ class SessionManager:
                     (df['手術実施日_dt'] <= end_date)
                 ]
             
-            # キャッシュに保存
             period_cache[cache_key] = filtered_df
             st.session_state[SessionManager.SESSION_KEYS['period_cache']] = period_cache
-            
-            logger.info(f"期間フィルタリング: {len(df)} -> {len(filtered_df)} 件 (ページ: {page_name})")
             return filtered_df
             
         except Exception as e:

@@ -1,43 +1,48 @@
-# app.py (最終版) - リファクタリング完了
+# app.py
 """
-手術分析ダッシュボード - メインアプリケーション
-リファクタリング版: UI層を完全分離した保守性の高いアーキテクチャ
-Version 1.0.0 - 本番レディ
+手術ダッシュボード メインアプリケーション
 """
 
 import streamlit as st
-from config import style_config
-from ui import SessionManager, SidebarManager, render_current_page, ErrorHandler
-from ui.error_handler import setup_global_exception_handler
+import logging
+from ui.session_manager import SessionManager
+from ui.page_router import PageRouter
+from ui.sidebar import SidebarManager  # SidebarManagerをインポート
 
-# ページ設定 (必ず最初に実行)
+# 基本設定
 st.set_page_config(
-    page_title="手術分析ダッシュボード", 
-    page_icon="🏥", 
-    layout="wide", 
+    page_title="手術ダッシュボード",
+    page_icon="🏥",
+    layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# ログ設定
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def main():
     """メインアプリケーション"""
     try:
-        # グローバル例外ハンドラー設定
-        setup_global_exception_handler()
-        
-        # スタイル読み込み
-        style_config.load_dashboard_css()
-        
-        # セッション状態初期化
+        # セッション初期化
         SessionManager.initialize_session_state()
-        
-        # サイドバー描画
+
+        # サイドバーの描画をSidebarManagerに一任する
         SidebarManager.render()
         
-        # 現在のページを描画
-        render_current_page()
+        # メインコンテンツ表示
+        router = PageRouter()
+        router.render_current_page()
         
     except Exception as e:
-        ErrorHandler.handle_error(e, "メインアプリケーション", show_details=True)
+        logger.error(f"アプリケーション実行エラー: {e}", exc_info=True)
+        st.error(f"アプリケーションエラーが発生しました: {e}")
+        if st.checkbox("デバッグ情報を表示"):
+            st.exception(e)
 
+# アプリケーション実行
 if __name__ == "__main__":
     main()

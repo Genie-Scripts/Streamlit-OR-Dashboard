@@ -1,4 +1,10 @@
-# analysis/ranking.py (手術室稼働率計算 修正版)
+# analysis/ranking.py
+"""
+手術室稼働率計算、KPIサマリー、診療科パフォーマンス計算
+- 期間定義の堅牢化
+- 平均計算のバグ修正
+- 達成率ソート機能の追加
+"""
 import pandas as pd
 import numpy as np
 from datetime import datetime, time, timedelta
@@ -16,408 +22,393 @@ def _normalize_room_name(series):
         try:
             if pd.isna(name) or name == 'nan':
                 return None
-                
             name_str = str(name).strip()
             if not name_str:
                 return None
-            
-            # 全角文字を半角に変換
             half_width_name = unicodedata.normalize('NFKC', name_str)
-            
-            # ＯＰ－数字 パターンをチェック
-            # 例: ＯＰ－１ → OR1, ＯＰ－１２ → OR12
             op_pattern = re.match(r'[OＯ][PＰ][-－](\d+)([AＡBＢ]?)', half_width_name)
             if op_pattern:
                 room_num = int(op_pattern.group(1))
-                suffix = op_pattern.group(2) if op_pattern.group(2) else ""
-                
-                # 有効な手術室番号の範囲チェック（1-12）
-                if 1 <= room_num <= 12:
-                    # OR11A, OR11Bは除外
-                    if room_num == 11:
-                        return None
+                if 1 <= room_num <= 12 and room_num != 11:
                     return f"OR{room_num}"
-            
-            # その他の手術室（心カテ、外手セ、アンギオ室など）は除外
             return None
-            
         except Exception:
             return None
-    
     return series.apply(normalize_single_name)
 
 def _convert_to_datetime(time_series, date_series):
-    """時刻文字列・数値をdatetimeオブジェクトに変換する（Excel形式対応）"""
-    try:
-        result = pd.Series(pd.NaT, index=time_series.index)
-        
-        for idx in time_series.index:
-            if pd.isna(time_series[idx]) or pd.isna(date_series[idx]):
+    """時刻文字列・数値をdatetimeオブジェクトに変換する"""
+    result = pd.Series(pd.NaT, index=time_series.index)
+    for idx in time_series.index:
+        if pd.isna(time_series[idx]) or pd.isna(date_series[idx]):
+            continue
+        time_value = time_series[idx]
+        date_obj = date_series[idx]
+        try:
+            if isinstance(time_value, (int, float)) and 0 <= time_value <= 1:
+                total_seconds = time_value * 24 * 3600
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, _ = divmod(remainder, 60)
+                result[idx] = datetime.combine(date_obj.date(), time(int(hours), int(minutes)))
                 continue
-                
-            time_value = time_series[idx]
-            date_obj = date_series[idx]
-            
-            try:
-                # 数値形式（Excel時刻）の場合
-                if isinstance(time_value, (int, float)):
-                    # Excel時刻形式 (0-1の小数値)
-                    if 0 <= time_value <= 1:
-                        total_seconds = time_value * 24 * 3600
-                        hours = int(total_seconds // 3600)
-                        minutes = int((total_seconds % 3600) // 60)
-                        
-                        if 0 <= hours <= 23 and 0 <= minutes <= 59:
-                            if isinstance(date_obj, datetime):
-                                result[idx] = datetime.combine(date_obj.date(), time(hours, minutes))
-                            else:
-                                result[idx] = datetime.combine(date_obj, time(hours, minutes))
-                        continue
-                
-                # 文字列形式の場合
-                time_str = str(time_value).strip()
-                
-                # HH:MM形式
-                if ':' in time_str:
-                    parts = time_str.split(':')
-                    if len(parts) >= 2:
-                        try:
-                            hour = int(parts[0])
-                            minute = int(parts[1])
-                            
-                            if 0 <= hour <= 23 and 0 <= minute <= 59:
-                                if isinstance(date_obj, datetime):
-                                    result[idx] = datetime.combine(date_obj.date(), time(hour, minute))
-                                else:
-                                    result[idx] = datetime.combine(date_obj, time(hour, minute))
-                        except ValueError:
-                            continue
-                
-                # HHMM形式（4桁数字）
-                elif time_str.isdigit() and len(time_str) == 4:
-                    hour = int(time_str[:2])
-                    minute = int(time_str[2:])
-                    
-                    if 0 <= hour <= 23 and 0 <= minute <= 59:
-                        if isinstance(date_obj, datetime):
-                            result[idx] = datetime.combine(date_obj.date(), time(hour, minute))
-                        else:
-                            result[idx] = datetime.combine(date_obj, time(hour, minute))
-                
-            except (ValueError, AttributeError, TypeError):
-                continue
-                
-        return result
-    except Exception:
-        return pd.Series(pd.NaT, index=time_series.index)
+            time_str = str(time_value).strip()
+            if ':' in time_str:
+                parts = time_str.split(':')
+                if len(parts) >= 2:
+                    hour, minute = int(parts[0]), int(parts[1])
+                    result[idx] = datetime.combine(date_obj.date(), time(hour, minute))
+            elif time_str.isdigit() and len(time_str) == 4:
+                hour, minute = int(time_str[:2]), int(time_str[2:])
+                result[idx] = datetime.combine(date_obj.date(), time(hour, minute))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    return result
 
 def calculate_operating_room_utilization(df, period_df):
-    """
-    手術室の稼働率を実計算する
-    
-    稼働率の定義：
-    - 対象手術室：OR1〜OR12（OR11を除く）の11室
-    - 稼働時間：平日9:00〜17:15（495分）
-    - 計算式：(実際の手術時間の合計) / (495分 × 11室 × 平日日数) × 100
-    """
+    """手術室の稼働率を実計算する"""
     try:
-        if df.empty or period_df.empty:
+        if period_df.empty or 'is_weekday' not in period_df.columns:
             return 0.0
-            
-        # 平日のみを対象とする
-        if 'is_weekday' not in period_df.columns:
-            return 0.0
-            
         weekday_df = period_df[period_df['is_weekday']].copy()
         if weekday_df.empty:
             return 0.0
-        
-        # 列名の特定（実際の列名を使用）
-        columns = list(weekday_df.columns)
-        
-        # 実施手術室の列を特定
-        room_col = None
-        for col in columns:
-            if '手術室' in str(col) or '実施手術室' in str(col):
-                room_col = col
-                break
-        
-        # 入室時刻の列を特定
-        start_col = None
-        for col in columns:
-            if '入室' in str(col) and '時刻' in str(col):
-                start_col = col
-                break
-        
-        # 退室時刻の列を特定
-        end_col = None
-        for col in columns:
-            if '退室' in str(col) and '時刻' in str(col):
-                end_col = col
-                break
-        
-        # インデックスベースでのフォールバック
-        if not room_col and len(columns) > 2:
-            room_col = columns[2]  # 3列目
-        if not start_col and len(columns) > 8:
-            start_col = columns[8]  # 9列目
-        if not end_col and len(columns) > 9:
-            end_col = columns[9]   # 10列目
-        
-        if not all([start_col, end_col, room_col]):
+        room_col = next((c for c in weekday_df.columns if '手術室' in str(c)), None)
+        start_col = next((c for c in weekday_df.columns if '入室' in str(c) and '時刻' in str(c)), None)
+        end_col = next((c for c in weekday_df.columns if '退室' in str(c) and '時刻' in str(c)), None)
+        if not all([room_col, start_col, end_col]):
             return 0.0
-        
-        # 対象手術室（OR1〜OR12、OR11除く）
         target_rooms = [f'OR{i}' for i in range(1, 13) if i != 11]
-        
-        # 手術室名を正規化
         weekday_df['normalized_room'] = _normalize_room_name(weekday_df[room_col])
-        
-        # 対象手術室でフィルタリング
         filtered_df = weekday_df[weekday_df['normalized_room'].isin(target_rooms)].copy()
-        
         if filtered_df.empty:
             return 0.0
-        
-        # 時刻をdatetimeに変換
-        filtered_df['start_datetime'] = _convert_to_datetime(
-            filtered_df[start_col], 
-            filtered_df['手術実施日_dt']
-        )
-        filtered_df['end_datetime'] = _convert_to_datetime(
-            filtered_df[end_col], 
-            filtered_df['手術実施日_dt']
-        )
-        
-        # 有効な時刻データのみを残す
+        filtered_df['start_datetime'] = _convert_to_datetime(filtered_df[start_col], filtered_df['手術実施日_dt'])
+        filtered_df['end_datetime'] = _convert_to_datetime(filtered_df[end_col], filtered_df['手術実施日_dt'])
         valid_time_df = filtered_df.dropna(subset=['start_datetime', 'end_datetime']).copy()
-        
         if valid_time_df.empty:
             return 0.0
-        
-        # 終了時刻が開始時刻より早い場合（日をまたぐ）は翌日とする
         overnight_mask = valid_time_df['end_datetime'] < valid_time_df['start_datetime']
         if overnight_mask.any():
             valid_time_df.loc[overnight_mask, 'end_datetime'] += timedelta(days=1)
-        
-        # 稼働時間の計算
-        operation_start_time = time(9, 0)   # 9:00
-        operation_end_time = time(17, 15)   # 17:15
-        
+        operation_start_time, operation_end_time = time(9, 0), time(17, 15)
         total_usage_minutes = 0
-        
         for _, row in valid_time_df.iterrows():
-            surgery_date = row['手術実施日_dt'].date()
-            operation_start = datetime.combine(surgery_date, operation_start_time)
-            operation_end = datetime.combine(surgery_date, operation_end_time)
-            
-            # 手術の実際の開始・終了時刻
-            actual_start = max(row['start_datetime'], operation_start)
-            actual_end = min(row['end_datetime'], operation_end)
-            
-            # 稼働時間内の手術時間を計算
+            op_start = datetime.combine(row['手術実施日_dt'].date(), operation_start_time)
+            op_end = datetime.combine(row['手術実施日_dt'].date(), operation_end_time)
+            actual_start = max(row['start_datetime'], op_start)
+            actual_end = min(row['end_datetime'], op_end)
             if actual_end > actual_start:
-                usage_minutes = (actual_end - actual_start).total_seconds() / 60
-                total_usage_minutes += usage_minutes
-        
-        # 期間内の平日数を計算
-        period_start = period_df['手術実施日_dt'].min()
-        period_end = period_df['手術実施日_dt'].max()
-        
-        # 平日数を計算（pandas.bdate_rangeを使用）
-        weekdays = pd.bdate_range(start=period_start, end=period_end)
-        total_weekdays = len(weekdays)
-        
-        # 稼働率を計算
-        # 総稼働可能時間 = 495分 × 11室 × 平日数
-        num_rooms = 11
-        operation_minutes_per_day = 495  # 9:00-17:15 = 495分
-        total_available_minutes = total_weekdays * num_rooms * operation_minutes_per_day
-        
+                total_usage_minutes += (actual_end - actual_start).total_seconds() / 60
+        total_weekdays = len(pd.bdate_range(start=period_df['手術実施日_dt'].min(), end=period_df['手術実施日_dt'].max()))
+        total_available_minutes = total_weekdays * 11 * 495
         if total_available_minutes > 0:
-            utilization_rate = (total_usage_minutes / total_available_minutes) * 100
-            utilization_rate = min(utilization_rate, 100.0)  # 100%を上限とする
+            utilization_rate = min((total_usage_minutes / total_available_minutes) * 100, 100.0)
             return utilization_rate
-        else:
-            return 0.0
-            
-    except Exception as e:
+        return 0.0
+    except Exception:
         return 0.0
 
 def get_kpi_summary(df, latest_date):
-    """
-    ダッシュボード用の主要KPIサマリーを計算する（完全週単位）
-    """
-    if df.empty:
-        return {}
-    
-    # 分析終了日を前の日曜日に設定（完全週対応）
-    from analysis import weekly
+    """ダッシュボード用の主要KPIサマリーを計算する"""
+    if df.empty: return {}
     analysis_end_date = weekly.get_analysis_end_date(latest_date)
-    
-    if analysis_end_date is None:
-        return {}
-    
-    # 直近4週間のデータを取得（28日 = 4週間）
-    four_weeks_ago = analysis_end_date - pd.Timedelta(days=27)  # 4週間 - 1日
-    recent_df = df[
-        (df['手術実施日_dt'] >= four_weeks_ago) & 
-        (df['手術実施日_dt'] <= analysis_end_date)
-    ]
-    
-    # 1. 全身麻酔手術のみのデータ
+    if not analysis_end_date: return {}
+    four_weeks_ago = analysis_end_date - pd.Timedelta(days=27)
+    recent_df = df[(df['手術実施日_dt'] >= four_weeks_ago) & (df['手術実施日_dt'] <= analysis_end_date)]
     gas_df = recent_df[recent_df['is_gas_20min']]
-    
-    # 2. 全手術データ（全身麻酔以外も含む）
-    all_surgery_df = recent_df.copy()
-    
-    if gas_df.empty:
-        return {}
-    
-    # 基本統計（完全4週間）
-    days_in_period = 28  # 完全4週間
-    weekdays_in_period = 20  # 4週間 × 5平日
-    
-    # 全身麻酔手術の統計
-    gas_total_cases = len(gas_df)
+    if gas_df.empty: return {}
     gas_weekday_df = gas_df[gas_df['is_weekday']]
-    gas_avg_cases_per_weekday = len(gas_weekday_df) / weekdays_in_period
-    
-    # 全手術の統計
-    all_total_cases = len(all_surgery_df)
-    
-    # 手術室稼働率（全手術対象、平日のみ）
-    utilization_rate = calculate_operating_room_utilization(df, recent_df)
-    
-    # メインKPIのみを返す（詳細データは削除）
     return {
-        "全身麻酔手術件数 (直近4週)": gas_total_cases,
-        "全手術件数 (直近4週)": all_total_cases,
-        "平日1日あたり全身麻酔手術件数": f"{gas_avg_cases_per_weekday:.1f}",
-        "手術室稼働率 (全手術、平日のみ)": f"{utilization_rate:.1f}%"
+        "全身麻酔手術件数 (直近4週)": len(gas_df),
+        "全手術件数 (直近4週)": len(recent_df),
+        "平日1日あたり全身麻酔手術件数": f"{len(gas_weekday_df) / 20.0:.1f}",
+        "手術室稼働率 (全手術、平日のみ)": f"{calculate_operating_room_utilization(df, recent_df):.1f}%"
     }
 
+
+def calculate_yearly_surgery_comparison(df, current_date):
+    """
+    全身麻酔手術件数と稼働率の年度比較を計算
+    
+    Args:
+        df: 手術データ
+        current_date: 現在の日付
+        
+    Returns:
+        dict: 年度比較結果
+    """
+    try:
+        if df.empty:
+            return {}
+        
+        # 現在の年度判定（4月開始）
+        if current_date.month >= 4:
+            current_fiscal_year = current_date.year
+        else:
+            current_fiscal_year = current_date.year - 1
+        
+        # 今年度データ（4/1 - current_date）
+        current_fiscal_start = pd.Timestamp(year=current_fiscal_year, month=4, day=1)
+        current_fiscal_data = df[
+            (df['手術実施日_dt'] >= current_fiscal_start) & 
+            (df['手術実施日_dt'] <= current_date) &
+            (df['is_gas_20min'])
+        ]
+        
+        # 昨年度同期データ（昨年4/1 - 昨年同月日）
+        prev_fiscal_start = pd.Timestamp(year=current_fiscal_year-1, month=4, day=1)
+        try:
+            prev_fiscal_end = pd.Timestamp(year=current_date.year-1, month=current_date.month, day=current_date.day)
+        except ValueError:
+            # 2月29日などの特殊ケース対応
+            prev_fiscal_end = pd.Timestamp(year=current_date.year-1, month=current_date.month, day=28)
+        
+        prev_fiscal_data = df[
+            (df['手術実施日_dt'] >= prev_fiscal_start) & 
+            (df['手術実施日_dt'] <= prev_fiscal_end) &
+            (df['is_gas_20min'])
+        ]
+        
+        # 統計計算
+        current_total = len(current_fiscal_data)
+        prev_total = len(prev_fiscal_data)
+        
+        # 増減計算
+        difference = current_total - prev_total
+        growth_rate = (difference / prev_total * 100) if prev_total > 0 else 0
+        
+        # 年度末予測（現在のペースで推定）
+        # 年度末予測（今年度の平日1日平均実績 × 今年度の総平日日数）
+        # 今年度の平日における全身麻酔手術データを抽出
+        current_fiscal_weekday_data = current_fiscal_data[current_fiscal_data['is_weekday']]
+        
+        # 今年度の開始日から今日までの平日日数を計算
+        elapsed_weekdays = len(pd.bdate_range(start=current_fiscal_start, end=current_date))
+        
+        # 平日1日あたりの平均手術件数を計算
+        avg_surgeries_per_weekday = len(current_fiscal_weekday_data) / elapsed_weekdays if elapsed_weekdays > 0 else 0
+        
+        # 今年度全体の平日日数を計算
+        fiscal_year_end = pd.Timestamp(year=current_fiscal_year + 1, month=3, day=31)
+        total_fiscal_weekdays = len(pd.bdate_range(start=current_fiscal_start, end=fiscal_year_end))
+        
+        # 新しい予測値を計算
+        projected_total = int(avg_surgeries_per_weekday * total_fiscal_weekdays)
+
+        
+        # === 追加部分 Start ===
+        # 前年度同期の稼働率を計算 (直近4週間の比較)
+        analysis_end_date = weekly.get_analysis_end_date(current_date)
+        four_weeks_ago = analysis_end_date - pd.Timedelta(days=27)
+
+        # 前年度の同期間を定義
+        prev_year_end_date = analysis_end_date - pd.DateOffset(years=1)
+        prev_year_start_date = four_weeks_ago - pd.DateOffset(years=1)
+
+        # 前年度同期のデータフレームをフィルタリング
+        recent_df_prev_year = df[
+            (df['手術実施日_dt'] >= prev_year_start_date) &
+            (df['手術実施日_dt'] <= prev_year_end_date)
+        ]
+
+        # 前年度同期の稼働率を計算
+        prev_year_utilization = calculate_operating_room_utilization(df, recent_df_prev_year)
+        prev_year_utilization_str = f"{prev_year_utilization:.1f}%" if prev_year_utilization > 0 else "N/A"
+        # === 追加部分 End ===
+        
+        return {
+            "current_fiscal_total": current_total,
+            "prev_fiscal_total": prev_total,
+            "difference": difference,
+            "growth_rate": growth_rate,
+            "projected_annual": projected_total,
+            "period_desc": f"{current_fiscal_year}年度",
+            "comparison_period": f"{current_fiscal_start.strftime('%Y/%m/%d')} - {current_date.strftime('%Y/%m/%d')}",
+            "fiscal_year": current_fiscal_year,
+            "prev_year_utilization_rate": prev_year_utilization_str, # <<< 追加したデータ
+        }
+        
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"年度比較計算エラー: {e}")
+        return {
+            "current_fiscal_total": 0,
+            "prev_fiscal_total": 0,
+            "difference": 0,
+            "growth_rate": 0,
+            "projected_annual": 0,
+            "period_desc": "データ不足",
+            "comparison_period": "計算不可",
+            "fiscal_year": datetime.now().year,
+            "prev_year_utilization_rate": "N/A", # <<< エラー時もキーを追加
+        }
+
+
+def get_monthly_surgery_trend(df, fiscal_year):
+    """
+    月別手術件数トレンド取得
+    
+    Args:
+        df: 手術データ
+        fiscal_year: 対象年度
+        
+    Returns:
+        list: 月別トレンドデータ
+    """
+    try:
+        if df.empty:
+            return []
+        
+        start_date = pd.Timestamp(year=fiscal_year, month=4, day=1)
+        end_date = pd.Timestamp(year=fiscal_year+1, month=3, day=31)
+        
+        fiscal_data = df[
+            (df['手術実施日_dt'] >= start_date) & 
+            (df['手術実施日_dt'] <= end_date) &
+            (df['is_gas_20min'])
+        ].copy()
+        
+        if fiscal_data.empty:
+            return []
+        
+        # 月別集計
+        fiscal_data['年月'] = fiscal_data['手術実施日_dt'].dt.to_period('M')
+        monthly_counts = fiscal_data.groupby('年月').size().reset_index(name='件数')
+        
+        # 4月から3月の順序で整理
+        result = []
+        for month in range(4, 16):  # 4-15月（翌年3月まで）
+            actual_month = month if month <= 12 else month - 12
+            actual_year = fiscal_year if month <= 12 else fiscal_year + 1
+            
+            period = pd.Period(year=actual_year, month=actual_month, freq='M')
+            count = monthly_counts[monthly_counts['年月'] == period]['件数'].sum()
+            
+            month_name = f"{actual_month}月"
+            if actual_month == current_date.month and actual_year == current_date.year:
+                month_name += "（途中）"
+            
+            result.append({
+                'month': month_name,
+                'count': int(count),
+                'is_current_fiscal': True,
+                'period': period
+            })
+        
+        return result
+        
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"月別トレンド取得エラー: {e}")
+        return []
+
+
+def safe_yearly_comparison(df, current_date):
+    """
+    エラー耐性のある年度比較（ラッパー関数）
+    """
+    try:
+        return calculate_yearly_surgery_comparison(df, current_date)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"安全な年度比較計算エラー: {e}")
+        return {
+            "current_fiscal_total": 0,
+            "prev_fiscal_total": 0,
+            "difference": 0,
+            "growth_rate": 0,
+            "projected_annual": 0,
+            "period_desc": "データ不足",
+            "comparison_period": "計算不可",
+            "fiscal_year": datetime.now().year
+        }
+
+
+def get_enhanced_kpi_summary(df, latest_date):
+    """
+    年度比較を含む拡張KPIサマリー
+    
+    Args:
+        df: 手術データ
+        latest_date: 最新日付
+        
+    Returns:
+        dict: 拡張KPIデータ
+    """
+    try:
+        # 基本KPI取得
+        basic_kpi = get_kpi_summary(df, latest_date)
+        
+        # 年度比較データ追加
+        yearly_comparison = safe_yearly_comparison(df, latest_date)
+        
+        # 月別トレンド追加
+        fiscal_year = yearly_comparison.get('fiscal_year', datetime.now().year)
+        monthly_trend = get_monthly_surgery_trend(df, fiscal_year)
+        
+        # 統合データ返却
+        return {
+            **basic_kpi,
+            'yearly_comparison': yearly_comparison,
+            'monthly_trend': monthly_trend,
+            'enhanced': True
+        }
+        
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"拡張KPIサマリー計算エラー: {e}")
+        # フォールバックとして基本KPIのみ返却
+        return get_kpi_summary(df, latest_date)
+
 def get_department_performance_summary(df, target_dict, latest_date):
-    """診療科別パフォーマンスサマリーを取得"""
+    """診療科別パフォーマンスサマリーを取得（期間定義・平均計算・ソート修正版）"""
     if df.empty or not target_dict:
         return pd.DataFrame()
-    
-    analysis_end_date = weekly.get_analysis_end_date(latest_date)
-    if analysis_end_date is None:
-        return pd.DataFrame()
-    
-    # 直近4週間のデータ
-    start_date_filter = analysis_end_date - pd.Timedelta(days=27)
+
+    # 1. 分析期間の正確な定義
+    # latest_dateが含まれる週の日曜日を分析終了日とする (日曜日が週の終わり weekday()==6)
+    analysis_end_date = latest_date + pd.Timedelta(days=(6 - latest_date.weekday()))
+    start_date_filter = analysis_end_date - pd.Timedelta(days=27)  # 4週間前
+
+    # 4週間のデータをフィルタリング
     four_weeks_df = df[
-        (df['手術実施日_dt'] >= start_date_filter) & 
-        (df['手術実施日_dt'] <= analysis_end_date)
+        (df['手術実施日_dt'] >= start_date_filter) &
+        (df['手術実施日_dt'] <= analysis_end_date) &
+        (df['is_gas_20min'])  # 全身麻酔のみ
     ]
-    
-    gas_df = four_weeks_df[four_weeks_df['is_gas_20min']]
-    if gas_df.empty:
+    if four_weeks_df.empty:
         return pd.DataFrame()
-    
+
     results = []
     for dept in target_dict.keys():
-        dept_data = gas_df[gas_df['実施診療科'] == dept]
-        if dept_data.empty:
-            continue
-        
-        total_cases = len(dept_data)
-        num_weeks = dept_data['week_start'].nunique()
-        avg_weekly = total_cases / 4 if num_weeks == 0 else total_cases / num_weeks
-        
+        dept_data = four_weeks_df[four_weeks_df['実施診療科'] == dept]
+
+        # 2. 4週平均の計算
+        # 常に4で割ることで、手術がない週も考慮した正確な平均を計算
+        avg_weekly = len(dept_data) / 4.0
+
+        # 3. 直近週実績の計算
+        if not dept_data.empty:
+            # 4週間データの中から最新の週を特定
+            latest_week_start = dept_data['week_start'].max()
+            latest_week_cases = len(dept_data[dept_data['week_start'] == latest_week_start])
+        else:
+            latest_week_cases = 0
+
         target = target_dict.get(dept, 0)
-        achievement_rate = (avg_weekly / target) * 100 if target > 0 else 0
-        
-        # 最新週の実績
-        latest_week_start = dept_data['week_start'].max() if not dept_data.empty else pd.NaT
-        latest_week_cases = len(dept_data[dept_data['week_start'] == latest_week_start])
-        
+        achievement_rate = (latest_week_cases / target) * 100 if target > 0 else 0
+
         results.append({
             "診療科": dept,
-            "4週平均": avg_weekly,
+            "4週平均": round(avg_weekly, 1),
             "直近週実績": latest_week_cases,
             "週次目標": target,
-            "達成率(%)": achievement_rate,
+            "達成率(%)": round(achievement_rate, 1),
         })
-    
+
     if not results:
         return pd.DataFrame()
-    
-    return pd.DataFrame(results)
 
-def calculate_achievement_rates(df, target_dict):
-    """
-    診療科ごとの目標達成率を計算する。
-    """
-    if df.empty or not target_dict:
-        return pd.DataFrame()
-
-    gas_df = df[df['is_gas_20min']].copy()
-    if gas_df.empty:
-        return pd.DataFrame()
-
-    actual_start_date = gas_df['手術実施日_dt'].min()
-    actual_end_date = gas_df['手術実施日_dt'].max()
-    period_days = (actual_end_date - actual_start_date).days + 1
-    weeks_in_period = period_days / 7.0
-
-    if weeks_in_period <= 0:
-        return pd.DataFrame()
-
-    dept_counts = gas_df.groupby('実施診療科').size().reset_index(name='実績件数')
-
-    result = []
-    for _, row in dept_counts.iterrows():
-        dept = row['実施診療科']
-        if dept in target_dict:
-            actual_count = row['実績件数']
-            weekly_target = target_dict[dept]
-            target_count_period = weekly_target * weeks_in_period
-            achievement_rate = (actual_count / target_count_period) * 100 if target_count_period > 0 else 0
-
-            result.append({
-                '診療科': dept,
-                '実績件数': actual_count,
-                '期間内目標件数': round(target_count_period, 1),
-                '達成率(%)': round(achievement_rate, 1)
-            })
-
-    if not result:
-        return pd.DataFrame()
-
-    result_df = pd.DataFrame(result)
-    return result_df.sort_values('達成率(%)', ascending=False).reset_index(drop=True)
-
-def calculate_cumulative_cases(df, target_weekly_cases):
-    """
-    今年度の累積実績と目標を週次で計算する
-    """
-    if df.empty:
-        return pd.DataFrame()
-
-    fiscal_year = date_helpers.get_fiscal_year(df['手術実施日_dt'].max())
-    start_fiscal_year = pd.Timestamp(fiscal_year, 4, 1)
-    
-    df_fiscal = df[(df['手術実施日_dt'] >= start_fiscal_year) & (df['is_gas_20min'])].copy()
-
-    if df_fiscal.empty:
-        return pd.DataFrame()
-
-    weekly_actual = df_fiscal.groupby('week_start').size().reset_index(name='週次実績')
-    
-    min_week = df_fiscal['week_start'].min()
-    max_week = df_fiscal['week_start'].max()
-
-    all_weeks = pd.date_range(start=min_week, end=max_week, freq='W-MON')
-    
-    weekly_df = pd.DataFrame({'週': all_weeks})
-    weekly_df = pd.merge(weekly_df, weekly_actual, left_on='週', right_on='week_start', how='left').fillna(0)
-    weekly_df = weekly_df.sort_values('週')
-    weekly_df['週次実績'] = weekly_df['週次実績'].astype(int)
-    weekly_df['累積実績'] = weekly_df['週次実績'].cumsum()
-    weekly_df['経過週'] = np.arange(len(weekly_df)) + 1
-    weekly_df['累積目標'] = weekly_df['経過週'] * target_weekly_cases
-    
-    return weekly_df[['週', '週次実績', '累積実績', '累積目標']]
+    # 4. DataFrameに変換し、達成率でソート
+    result_df = pd.DataFrame(results)
+    return result_df.sort_values(by="達成率(%)", ascending=False)
