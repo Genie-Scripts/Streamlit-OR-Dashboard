@@ -2750,7 +2750,7 @@ def create_surgery_github_publisher_interface():
         
         repo_name = st.sidebar.text_input(
             "リポジトリ名",
-            value=saved_settings.get('repo_name', 'Streamlit-Surgery-Dashboard'),
+            value=saved_settings.get('repo_name', 'Streamlit-OR-Dashboard'),
             help="公開用リポジトリ名",
             key="surgery_repo_name"
         )
