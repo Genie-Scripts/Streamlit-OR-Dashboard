@@ -22,18 +22,30 @@ class SurgeryGitHubPublisher:
         self.repo_name = repo_name
         self.branch = branch
         self.base_url = "https://api.github.com"
-        
+
     def publish_surgery_dashboard(self, df: pd.DataFrame, target_dict: Dict[str, float], 
                                 period: str = "直近12週", 
-                                report_type: str = "integrated_dashboard") -> Tuple[bool, str]:
+                                report_type: str = "integrated_dashboard",
+                                analysis_base_date: Optional[datetime] = None) -> Tuple[bool, str]:
         """手術分析ダッシュボードを公開（4タブ統合版）"""
         try:
             logger.info(f"🚀 統合手術分析ダッシュボード公開開始: 4タブ構成")
+
+            # 基準日が指定されていなければ、データ内の最新日を使用
+            if analysis_base_date is None:
+                analysis_base_date = df['手術実施日_dt'].max() if not df.empty else datetime.now()
             
-            # dfをインスタンス変数として保存
-            self.df = df
+            # 【重要】指定された基準日に基づいてデータフレームをフィルタリング
+            filtered_df = df[df['手術実施日_dt'] <= pd.to_datetime(analysis_base_date)].copy()
             
-            html_content = self._generate_integrated_html_content(df, target_dict, period)
+            if filtered_df.empty:
+                return False, "指定された基準日までのデータがありません。"
+
+            # フィルタリング後のdfをインスタンス変数として保存
+            self.df = filtered_df
+            
+            # HTML生成にはフィルタリング後のdfと基準日を渡す
+            html_content = self._generate_integrated_html_content(filtered_df, target_dict, period, analysis_base_date)
             
             if not html_content:
                 return False, "HTMLコンテンツの生成に失敗しました"
@@ -87,18 +99,18 @@ class SurgeryGitHubPublisher:
             return {}
 
     def _generate_integrated_html_content(self, df: pd.DataFrame, target_dict: Dict[str, float], 
-                                        period: str) -> Optional[str]:
+                                        period: str, latest_date: datetime) -> Optional[str]:
         """統合HTMLコンテンツを生成（4タブ構成）"""
         try:
-            # 最新日付取得
-            latest_date = df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns else datetime.now()
+            # 【重要】引数でlatest_dateを受け取るので、ここでの取得は不要
+            # latest_date = df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns else datetime.now()
             
-            # 基本データ収集
+            # 基本データ収集 (引数としてlatest_dateを渡す)
             basic_kpi = self._get_basic_kpi_data(df, latest_date)
             yearly_data = self._get_yearly_comparison_data(df, latest_date)
             high_score_data = self._get_high_score_data(df, target_dict, period)
             dept_performance = self._get_department_performance_data(df, target_dict, latest_date)
-            recent_week_kpi = self._get_recent_week_kpi_data(df, latest_date) # <<< 直近週データを追加
+            recent_week_kpi = self._get_recent_week_kpi_data(df, latest_date)
             
             # 統合HTML生成
             return self._generate_4tab_dashboard_html(
@@ -107,7 +119,7 @@ class SurgeryGitHubPublisher:
                 high_score_data=high_score_data,
                 dept_performance=dept_performance,
                 period=period,
-                recent_week_kpi=recent_week_kpi # <<< 直近週データを渡す
+                recent_week_kpi=recent_week_kpi
             )
             
         except Exception as e:
