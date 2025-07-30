@@ -583,19 +583,28 @@ class SurgeryGitHubPublisher:
         </div>
     """
 
-    def _generate_hospital_summary_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any], recent_week_kpi: Dict[str, Any]) -> str: # <<< 引数追加
-        """病院全体手術サマリタブ生成（デザイン統一版）"""
+    def _generate_hospital_summary_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any], recent_week_kpi: Dict[str, Any]) -> str:
+        """病院全体手術サマリタブ生成（デザイン統一版 + 週別推移チャート追加）"""
         try:
             # 他のタブとデザインを統一した新しいHTMLを生成
             summary_html = self._generate_unified_hospital_summary_html(yearly_data, basic_kpi, recent_week_kpi)
             
-            # 月別トレンドチャートはそのまま使用
+            # 月別トレンドチャート
             monthly_trend_chart = self._generate_monthly_trend_section(yearly_data)
+            
+            # 週別トレンドチャートを追加
+            if hasattr(self, 'df'):
+                latest_date = self.df['手術実施日_dt'].max() if '手術実施日_dt' in self.df.columns else pd.Timestamp.now()
+                weekly_trend_data = self._get_weekly_trend_data(self.df, latest_date)
+                weekly_trend_chart = self._generate_weekly_trend_section(weekly_trend_data)
+            else:
+                weekly_trend_chart = self._generate_fallback_weekly_chart()
             
             return f"""
             <div id="surgery-summary" class="view-content active">
                 {summary_html}
                 {monthly_trend_chart}
+                {weekly_trend_chart}
             </div>
             """
             
@@ -1170,6 +1179,190 @@ class SurgeryGitHubPublisher:
         except Exception as e:
             logger.error(f"フォールバックチャート生成エラー: {e}")
             return ""
+            
+    # reporting/surgery_github_publisher.py に追加する関数
+    def _get_weekly_trend_data(self, df: pd.DataFrame, latest_date: pd.Timestamp) -> list:
+        """週別トレンドデータを取得"""
+        try:
+            from analysis.weekly import get_weekly_trend_data
+            return get_weekly_trend_data(df, latest_date, weeks=8)
+        except Exception as e:
+            logger.error(f"週別トレンドデータ取得エラー: {e}")
+            return []
+    
+    
+    def _generate_weekly_trend_section(self, weekly_data: list) -> str:
+        """週別トレンドセクション生成（折れ線グラフ版、過去8週間表示）"""
+        try:
+            if not weekly_data:
+                return self._generate_fallback_weekly_chart()
+            
+            import json
+            from analysis.weekly import get_weekly_target_value
+            
+            labels = [item['week_name'] for item in weekly_data]
+            values = [int(item['count']) for item in weekly_data]
+            
+            target_value = get_weekly_target_value()  # 95件
+            target_line = [target_value] * len(labels)
+            
+            # 前年同月週平均値データ
+            prev_year_values = [
+                float(item['prev_year_month_avg']) if item.get('prev_year_month_avg') is not None else None 
+                for item in weekly_data
+            ]
+    
+            # Y軸の最大値・最小値をデータに合わせて動的に設定
+            all_plot_values = [v for v in values if v is not None] + \
+                            [v for v in prev_year_values if v is not None] + \
+                            [target_value]
+            
+            if not all_plot_values:
+                min_value, max_value = 0, 120
+            else:
+                data_min = min(all_plot_values)
+                data_max = max(all_plot_values)
+                padding = (data_max - data_min) * 0.15 if (data_max - data_min) > 0 else 10
+                min_value = int(max(0, data_min - padding))
+                max_value = int(data_max + padding)
+    
+            html_content = f'''
+            <div class="trend-chart">
+                <h3>📊 週別推移（全身麻酔手術件数 - 過去8週間）</h3>
+                <div style="position: relative; height: 300px; margin: 20px 0;">
+                    <canvas id="weeklyTrendChart"></canvas>
+                </div>
+                <p style="text-align: center; color: #666; font-size: 12px;">
+                    実線：当週実績 | 点線：前年同月週平均 | 破線：目標ライン（週{target_value}件）
+                </p>
+            </div>
+            
+            <script>
+            (function() {{
+                function initWeeklyChart() {{
+                    const ctx = document.getElementById('weeklyTrendChart');
+                    if (!ctx) {{
+                        setTimeout(initWeeklyChart, 100);
+                        return;
+                    }}
+                    
+                    const chartData = {{
+                        labels: {json.dumps(labels, ensure_ascii=False)},
+                        datasets: [
+                            {{
+                                label: '当週実績',
+                                data: {json.dumps(values)},
+                                borderColor: 'rgb(34, 197, 94)',
+                                backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                borderWidth: 3,
+                                tension: 0.1,
+                                pointRadius: 5,
+                                pointBackgroundColor: 'rgb(34, 197, 94)',
+                            }},
+                            {{
+                                label: '前年同月週平均',
+                                data: {json.dumps(prev_year_values)},
+                                borderColor: 'rgb(156, 163, 175)',
+                                backgroundColor: 'rgba(156, 163, 175, 0.1)',
+                                borderWidth: 2,
+                                borderDash: [5, 5],
+                                tension: 0.1,
+                                pointRadius: 4,
+                                spanGaps: true,
+                                pointBackgroundColor: 'rgb(156, 163, 175)',
+                            }},
+                            {{
+                                label: '目標ライン',
+                                data: {json.dumps(target_line)},
+                                borderColor: 'rgb(239, 68, 68)',
+                                borderWidth: 2,
+                                borderDash: [10, 5],
+                                pointRadius: 0,
+                                fill: false
+                            }}
+                        ]
+                    }};
+                    
+                    const chartOptions = {{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {{
+                            legend: {{
+                                display: true,
+                                position: 'top',
+                            }},
+                            tooltip: {{
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {{
+                                    label: function(context) {{
+                                        let label = context.dataset.label || '';
+                                        if (label) {{
+                                            label += ': ';
+                                        }}
+                                        if (context.parsed.y !== null) {{
+                                            label += context.parsed.y + '件';
+                                        }}
+                                        return label;
+                                    }}
+                                }}
+                            }}
+                        }},
+                        scales: {{
+                            y: {{
+                                display: true,
+                                suggestedMin: {min_value},
+                                suggestedMax: {max_value},
+                                grid: {{
+                                    color: 'rgba(0, 0, 0, 0.05)'
+                                }},
+                                ticks: {{
+                                    callback: function(value) {{
+                                        return Math.round(value) + '件';
+                                    }}
+                                }}
+                            }}
+                        }},
+                        interaction: {{
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }}
+                    }};
+                    
+                    new Chart(ctx, {{
+                        type: 'line',
+                        data: chartData,
+                        options: chartOptions
+                    }});
+                }}
+                
+                if (document.readyState === 'loading') {{
+                    document.addEventListener('DOMContentLoaded', initWeeklyChart);
+                }} else {{
+                    setTimeout(initWeeklyChart, 100);
+                }}
+            }})();
+            </script>
+            '''
+            
+            return html_content
+            
+        except Exception as e:
+            logger.error(f"週別トレンドセクション生成エラー: {e}")
+            return self._generate_fallback_weekly_chart()
+    
+    
+    def _generate_fallback_weekly_chart(self) -> str:
+        """フォールバック用の週別チャート表示"""
+        return """
+        <div class="trend-chart">
+            <h3>📊 週別推移（全身麻酔手術件数 - 過去8週間）</h3>
+            <p style="text-align: center; padding: 40px; color: #666;">
+                週別トレンドデータを準備中...
+            </p>
+        </div>
+        """
 
     def _generate_javascript_functions(self) -> str:
         """JavaScript関数生成（情報パネル機能追加版）"""
