@@ -8,7 +8,6 @@ from typing import Dict, Any, Optional, Tuple
 import base64
 import requests
 import json
-from ui.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,30 +21,18 @@ class SurgeryGitHubPublisher:
         self.repo_name = repo_name
         self.branch = branch
         self.base_url = "https://api.github.com"
-
+        
     def publish_surgery_dashboard(self, df: pd.DataFrame, target_dict: Dict[str, float], 
                                 period: str = "直近12週", 
-                                report_type: str = "integrated_dashboard",
-                                analysis_base_date: Optional[datetime] = None) -> Tuple[bool, str]:
+                                report_type: str = "integrated_dashboard") -> Tuple[bool, str]:
         """手術分析ダッシュボードを公開（4タブ統合版）"""
         try:
             logger.info(f"🚀 統合手術分析ダッシュボード公開開始: 4タブ構成")
-
-            # 基準日が指定されていなければ、データ内の最新日を使用
-            if analysis_base_date is None:
-                analysis_base_date = df['手術実施日_dt'].max() if not df.empty else datetime.now()
             
-            # 【重要】指定された基準日に基づいてデータフレームをフィルタリング
-            filtered_df = df[df['手術実施日_dt'] <= pd.to_datetime(analysis_base_date)].copy()
+            # dfをインスタンス変数として保存
+            self.df = df
             
-            if filtered_df.empty:
-                return False, "指定された基準日までのデータがありません。"
-
-            # フィルタリング後のdfをインスタンス変数として保存
-            self.df = filtered_df
-            
-            # HTML生成にはフィルタリング後のdfと基準日を渡す
-            html_content = self._generate_integrated_html_content(filtered_df, target_dict, period, analysis_base_date)
+            html_content = self._generate_integrated_html_content(df, target_dict, period)
             
             if not html_content:
                 return False, "HTMLコンテンツの生成に失敗しました"
@@ -99,15 +86,18 @@ class SurgeryGitHubPublisher:
             return {}
 
     def _generate_integrated_html_content(self, df: pd.DataFrame, target_dict: Dict[str, float], 
-                                        period: str, latest_date: datetime) -> Optional[str]:
+                                        period: str) -> Optional[str]:
         """統合HTMLコンテンツを生成（4タブ構成）"""
         try:
-            # 基本データ収集 (引数としてlatest_dateを渡す)
+            # 最新日付取得
+            latest_date = df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns else datetime.now()
+            
+            # 基本データ収集
             basic_kpi = self._get_basic_kpi_data(df, latest_date)
             yearly_data = self._get_yearly_comparison_data(df, latest_date)
             high_score_data = self._get_high_score_data(df, target_dict, period)
             dept_performance = self._get_department_performance_data(df, target_dict, latest_date)
-            recent_week_kpi = self._get_recent_week_kpi_data(df, latest_date)
+            recent_week_kpi = self._get_recent_week_kpi_data(df, latest_date) # <<< 直近週データを追加
             
             # 統合HTML生成
             return self._generate_4tab_dashboard_html(
@@ -116,8 +106,7 @@ class SurgeryGitHubPublisher:
                 high_score_data=high_score_data,
                 dept_performance=dept_performance,
                 period=period,
-                recent_week_kpi=recent_week_kpi,
-                latest_date=latest_date
+                recent_week_kpi=recent_week_kpi # <<< 直近週データを渡す
             )
             
         except Exception as e:
@@ -144,102 +133,12 @@ class SurgeryGitHubPublisher:
             return {}
     
     def _get_high_score_data(self, df: pd.DataFrame, target_dict: Dict[str, float], period: str) -> list:
-        """ハイスコアデータ取得（エラーハンドリング強化版）"""
+        """ハイスコアデータ取得"""
         try:
-            # まず weekly_surgery_ranking を試す
-            try:
-                from analysis.weekly_surgery_ranking import calculate_weekly_surgery_ranking
-                result = calculate_weekly_surgery_ranking(df, target_dict, period)
-                if result:
-                    logger.info(f"ハイスコアデータ取得成功: {len(result)}科")
-                    return result
-                else:
-                    logger.warning("weekly_surgery_ranking からデータが取得できませんでした")
-            except ImportError:
-                logger.warning("weekly_surgery_ranking モジュールが見つかりません")
-            except Exception as e:
-                logger.warning(f"weekly_surgery_ranking でエラー: {e}")
-            
-            # フォールバック: surgery_high_score を試す
-            try:
-                from analysis.surgery_high_score import calculate_surgery_high_scores
-                result = calculate_surgery_high_scores(df, target_dict, period)
-                if result:
-                    logger.info(f"フォールバック成功: {len(result)}科")
-                    return result
-                else:
-                    logger.warning("surgery_high_score からもデータが取得できませんでした")
-            except ImportError:
-                logger.warning("surgery_high_score モジュールが見つかりません")
-            except Exception as e:
-                logger.warning(f"surgery_high_score でエラー: {e}")
-            
-            # 最終フォールバック: 簡易ランキングを生成
-            return self._generate_simple_ranking(df, target_dict)
-            
+            from analysis.weekly_surgery_ranking import calculate_weekly_surgery_ranking
+            return calculate_weekly_surgery_ranking(df, target_dict, period)
         except Exception as e:
             logger.error(f"ハイスコアデータ取得エラー: {e}")
-            return []
-    
-    def _generate_simple_ranking(self, df: pd.DataFrame, target_dict: Dict[str, float]) -> list:
-        """簡易ランキング生成（最終フォールバック）"""
-        try:
-            if df.empty or not target_dict:
-                return []
-            
-            logger.info("簡易ランキングを生成中...")
-            
-            # 直近4週間のデータを取得
-            latest_date = df['手術実施日_dt'].max()
-            four_weeks_ago = latest_date - pd.Timedelta(weeks=4)
-            
-            recent_df = df[df['手術実施日_dt'] >= four_weeks_ago].copy()
-            
-            if recent_df.empty:
-                return []
-            
-            # 診療科別集計
-            dept_summary = []
-            for dept_name, target_value in target_dict.items():
-                dept_data = recent_df[recent_df['実施診療科'] == dept_name]
-                
-                if dept_data.empty:
-                    continue
-                
-                # 全身麻酔手術件数
-                gas_cases = len(dept_data[dept_data.get('is_gas_20min', True)])
-                # 達成率
-                achievement_rate = (gas_cases / (target_value * 4) * 100) if target_value > 0 else 0
-                # 簡易スコア
-                simple_score = min(100, achievement_rate * 0.8 + 20)
-                
-                dept_summary.append({
-                    'dept_name': dept_name,
-                    'display_name': dept_name,
-                    'total_score': simple_score,
-                    'achievement_rate': achievement_rate,
-                    'gas_cases': gas_cases,
-                    'target_value': target_value,
-                    'hospital_rank': 0,  # 後で設定
-                    'grade': 'B' if simple_score >= 70 else 'C',
-                    'target_performance': {'total': simple_score * 0.6},
-                    'improvement_score': {'total': simple_score * 0.25, 'stability': simple_score * 0.15},
-                    'competitive_score': simple_score * 0.15,
-                    'improvement_rate': 0
-                })
-            
-            # スコア順でソート
-            dept_summary.sort(key=lambda x: x['total_score'], reverse=True)
-            
-            # 順位を設定
-            for i, dept in enumerate(dept_summary):
-                dept['hospital_rank'] = i + 1
-            
-            logger.info(f"簡易ランキング生成完了: {len(dept_summary)}科")
-            return dept_summary
-            
-        except Exception as e:
-            logger.error(f"簡易ランキング生成エラー: {e}")
             return []
     
     def _get_department_performance_data(self, df: pd.DataFrame, target_dict: Dict[str, float], 
@@ -254,8 +153,7 @@ class SurgeryGitHubPublisher:
     
     def _generate_4tab_dashboard_html(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any],
                                     high_score_data: list, dept_performance: pd.DataFrame,
-                                    period: str, recent_week_kpi: Dict[str, Any], 
-                                    latest_date: datetime) -> str:
+                                    period: str, recent_week_kpi: Dict[str, Any]) -> str: # <<< 引数追加
         """4タブダッシュボードHTML生成"""
         try:
             current_date = datetime.now().strftime('%Y年%m月%d日')
@@ -274,7 +172,7 @@ class SurgeryGitHubPublisher:
     <div class="container">
         {self._generate_tab_navigation_html()}
         
-        {self._generate_hospital_summary_tab(yearly_data, basic_kpi, recent_week_kpi, latest_date)}
+        {self._generate_hospital_summary_tab(yearly_data, basic_kpi, recent_week_kpi)}
         
         {self._generate_high_score_tab(high_score_data, period)}
         
@@ -283,12 +181,11 @@ class SurgeryGitHubPublisher:
         {self._generate_analysis_tab(yearly_data, basic_kpi)}
     </div>
     
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     {self._generate_javascript_functions()}
     {self._generate_footer_html(current_date)}
 </body>
 </html>"""
-
+            
         except Exception as e:
             logger.error(f"4タブHTML生成エラー: {e}")
             return self._generate_error_html(str(e))
@@ -338,9 +235,159 @@ class SurgeryGitHubPublisher:
                         </tbody>
                     </table>
                 </div>
-            </div>
+                <div class="info-section">
+                    <h3>🎯 評価基準</h3>
+                </div>
+                
+                <div class="info-section score-calculation-section">
+                    <h3>🏆 ハイスコア計算方法（100点満点）</h3>
+                    <div class="score-explanation">
+                        <p class="score-intro">診療科ランキングの総合スコアは、以下の3つの指標から構成されています：</p>
+                        
+                        <div class="score-component">
+                            <h4>1. 🎯 全身麻酔手術件数（70点満点）- 最重要指標</h4>
+                            <div class="score-detail">
+                                <p>週単位の全身麻酔手術件数（麻酔時間20分以上）を多角的に評価します。</p>
+                                
+                                <div class="score-breakdown">
+                                    <h5>配点内訳：</h5>
+                                    <ul>
+                                        <li><strong>直近週達成度（30点）</strong>
+                                            <ul>
+                                                <li>CSV目標値に対する達成率で評価</li>
+                                                <li>達成率100%以上：30点</li>
+                                                <li>達成率90-99%：24点</li>
+                                                <li>達成率80-89%：18点</li>
+                                                <li>達成率70-79%：12点</li>
+                                                <li>達成率70%未満：0-6点</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>改善度（20点）</strong>
+                                            <ul>
+                                                <li>評価期間の平均と過去期間の平均を比較</li>
+                                                <li>改善率+20%以上：20点</li>
+                                                <li>改善率+10-19%：15点</li>
+                                                <li>改善率+5-9%：10点</li>
+                                                <li>改善率0-4%：5点</li>
+                                                <li>マイナス成長：0点</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>安定性（15点）</strong>
+                                            <ul>
+                                                <li>週次実績の変動係数で評価</li>
+                                                <li>変動係数10%未満：15点（非常に安定）</li>
+                                                <li>変動係数10-20%：12点（安定）</li>
+                                                <li>変動係数20-30%：8点（やや不安定）</li>
+                                                <li>変動係数30-40%：4点（不安定）</li>
+                                                <li>変動係数40%以上：0点（極めて不安定）</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>持続性（5点）</strong>
+                                            <ul>
+                                                <li>週次トレンドの傾きで評価</li>
+                                                <li>上昇トレンド：5点</li>
+                                                <li>横ばいトレンド：3点</li>
+                                                <li>下降トレンド：0点</li>
+                                            </ul>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="score-component">
+                            <h4>2. 📊 全手術件数（15点満点）</h4>
+                            <div class="score-detail">
+                                <p>診療科の全体的な手術活動量を評価します。</p>
+                                
+                                <div class="score-breakdown">
+                                    <h5>配点内訳：</h5>
+                                    <ul>
+                                        <li><strong>診療科間ランキング（10点）</strong>
+                                            <ul>
+                                                <li>1位：10点</li>
+                                                <li>2位：8点</li>
+                                                <li>3位：6点</li>
+                                                <li>4位：4点</li>
+                                                <li>5位：2点</li>
+                                                <li>6位以下：0点</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>改善度（5点）</strong>
+                                            <ul>
+                                                <li>前期比+10%以上：5点</li>
+                                                <li>前期比+5-9%：3点</li>
+                                                <li>前期比0-4%：1点</li>
+                                                <li>前期比マイナス：0点</li>
+                                            </ul>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="score-component">
+                            <h4>3. ⏱️ 総手術時間（15点満点）</h4>
+                            <div class="score-detail">
+                                <p>手術室の稼働効率と貢献度を評価します。</p>
+                                
+                                <div class="score-breakdown">
+                                    <h5>配点内訳：</h5>
+                                    <ul>
+                                        <li><strong>診療科間ランキング（10点）</strong>
+                                            <ul>
+                                                <li>1位：10点</li>
+                                                <li>2位：8点</li>
+                                                <li>3位：6点</li>
+                                                <li>4位：4点</li>
+                                                <li>5位：2点</li>
+                                                <li>6位以下：0点</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>改善度（5点）</strong>
+                                            <ul>
+                                                <li>前期比+10%以上：5点</li>
+                                                <li>前期比+5-9%：3点</li>
+                                                <li>前期比0-4%：1点</li>
+                                                <li>前期比マイナス：0点</li>
+                                            </ul>
+                                        </li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="calculation-note">
+                                    <p><strong>⚠️ 手術時間の計算方法：</strong></p>
+                                    <ul>
+                                        <li>入室時刻から退室時刻までの経過時間</li>
+                                        <li>深夜跨ぎ対応（23:30入室→1:15退室 = 1時間45分）</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="total-score-summary">
+                            <h4>📊 総合スコア = 全身麻酔(70点) + 全手術(15点) + 手術時間(15点)</h4>
+                            <p class="score-note">※ 最高100点満点で評価</p>
+                            
+                            <div class="grade-system">
+                                <h5>グレード判定：</h5>
+                                <ul class="grade-list">
+                                    <li><span class="grade-badge grade-s">S</span> 90点以上（卓越したパフォーマンス）</li>
+                                    <li><span class="grade-badge grade-a">A</span> 80-89点（優秀なパフォーマンス）</li>
+                                    <li><span class="grade-badge grade-b">B</span> 70-79点（良好なパフォーマンス）</li>
+                                    <li><span class="grade-badge grade-c">C</span> 60-69点（標準的なパフォーマンス）</li>
+                                    <li><span class="grade-badge grade-d">D</span> 60点未満（改善が必要）</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+            <!-- 既存の用語説明・計算方法・活用のヒントセクション -->
+            <!-- 省略（変更なし） -->
         </div>
-        """
+    </div>
+    """
 
     def _generate_tab_navigation_html(self) -> str:
         """タブナビゲーションHTML生成（統一デザイン版）"""
@@ -374,6 +421,7 @@ class SurgeryGitHubPublisher:
         recent_week_daily_avg = recent_week_kpi.get("平日1日あたり全身麻酔手術件数 (直近週)", "0.0")
     
         # 直近週の状態判定
+        # 評価クラスを決定
         if recent_week_gas >= 100:
             recent_week_class = "success"
         elif recent_week_gas >= 80:
@@ -535,27 +583,19 @@ class SurgeryGitHubPublisher:
         </div>
     """
 
-    def _generate_hospital_summary_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any], recent_week_kpi: Dict[str, Any], latest_date: datetime) -> str:
-        """病院全体手術サマリタブ生成（デザイン統一版 + 週別推移チャート追加）"""
+    def _generate_hospital_summary_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any], recent_week_kpi: Dict[str, Any]) -> str: # <<< 引数追加
+        """病院全体手術サマリタブ生成（デザイン統一版）"""
         try:
+            # 他のタブとデザインを統一した新しいHTMLを生成
             summary_html = self._generate_unified_hospital_summary_html(yearly_data, basic_kpi, recent_week_kpi)
             
+            # 月別トレンドチャートはそのまま使用
             monthly_trend_chart = self._generate_monthly_trend_section(yearly_data)
             
-            if hasattr(self, 'df'):
-                weekly_trend_data = self._get_weekly_trend_data(self.df, latest_date)
-                weekly_trend_chart = self._generate_weekly_trend_section(weekly_trend_data)
-            else:
-                weekly_trend_chart = self._generate_fallback_weekly_chart()
-            
-            # 2つのチャートを並列表示
             return f"""
             <div id="surgery-summary" class="view-content active">
                 {summary_html}
-                <div class="grid-container">
-                    {monthly_trend_chart}
-                    {weekly_trend_chart}
-                </div>
+                {monthly_trend_chart}
             </div>
             """
             
@@ -567,35 +607,7 @@ class SurgeryGitHubPublisher:
         """ハイスコア TOP3タブ生成（統一デザイン版）"""
         try:
             if not high_score_data:
-                # データがない場合の詳細なフォールバック表示
-                return f"""
-                <div id="high-score" class="view-content">
-                    <div class="stats-highlight">
-                        <h2>🏆 診療科ランキング TOP3</h2>
-                        <p>評価期間: {period}</p>
-                    </div>
-                    
-                    <div class="analysis-card info">
-                        <h3>📊 ハイスコアデータについて</h3>
-                        <ul>
-                            <li>現在、ランキング計算用のデータが不足しています</li>
-                            <li>診療科別の目標値と実績データが必要です</li>
-                            <li>データが準備できましたら自動的に表示されます</li>
-                            <li>評価期間「{period}」での分析を行います</li>
-                        </ul>
-                    </div>
-                    
-                    <div class="analysis-card warning">
-                        <h3>🔍 必要なデータ</h3>
-                        <ul>
-                            <li>週次全身麻酔手術件数の実績データ</li>
-                            <li>診療科別の週次目標値設定</li>
-                            <li>手術時間と麻酔種別情報</li>
-                            <li>最低3週間以上の継続データ</li>
-                        </ul>
-                    </div>
-                </div>
-                """
+                return '<div id="high-score" class="view-content"><p>ハイスコアデータがありません</p></div>'
             
             # TOP3を取得
             top3 = high_score_data[:3]
@@ -605,6 +617,7 @@ class SurgeryGitHubPublisher:
                 rank_emoji = ["🥇", "🥈", "🥉"][i]
                 achievement_pct = dept.get('achievement_rate', 0)
                 
+                # 統一されたランキングカード
                 ranking_html += f"""
                 <div class="ranking-card rank-{i+1}">
                     <div class="rank-header">
@@ -701,18 +714,7 @@ class SurgeryGitHubPublisher:
             
         except Exception as e:
             logger.error(f"ハイスコアタブ生成エラー: {e}")
-            return f"""
-            <div id="high-score" class="view-content">
-                <div class="analysis-card danger">
-                    <h3>❌ ハイスコアデータ読み込みエラー</h3>
-                    <ul>
-                        <li>データの読み込み中にエラーが発生しました</li>
-                        <li>データ形式と設定を確認してください</li>
-                        <li>エラー詳細: {str(e)}</li>
-                    </ul>
-                </div>
-            </div>
-            """
+            return '<div id="high-score" class="view-content"><p>ハイスコアデータの読み込みでエラーが発生しました</p></div>'
 
 
     def _generate_department_performance_tab(self, dept_performance: pd.DataFrame) -> str:
@@ -746,11 +748,12 @@ class SurgeryGitHubPublisher:
             </div>
             """
             
-            # 診療科カード生成
+            # 診療科カード生成（統一デザイン）
             cards_html = ""
             for _, row in dept_performance.iterrows():
                 achievement_rate = row['達成率(%)']
                 
+                # 達成率に応じた統一クラス
                 if achievement_rate >= 100:
                     card_class = "success"
                 elif achievement_rate >= 90:
@@ -798,7 +801,7 @@ class SurgeryGitHubPublisher:
             return '<div id="performance" class="view-content"><p>診療科別パフォーマンスデータの読み込みでエラーが発生しました</p></div>'
 
     def _generate_analysis_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any]) -> str:
-        """詳細分析タブ生成（統一デザイン版・改善提案強化）"""
+        """詳細分析タブ生成（統一デザイン版）"""
         try:
             growth_rate = yearly_data.get('growth_rate', 0) if yearly_data else 0
             utilization_str = basic_kpi.get("手術室稼働率 (全手術、平日のみ)", "0%") if basic_kpi else "0%"
@@ -807,6 +810,35 @@ class SurgeryGitHubPublisher:
                 utilization = float(utilization_str.replace("%", ""))
             except ValueError:
                 utilization = 0
+            
+            # 分析結果の判定
+            improvement_class = "success" if growth_rate > 0 else "warning" if growth_rate >= -2 else "danger"
+            action_class = "info"
+            
+            improvement_analysis = f"""
+            <div class="analysis-card {improvement_class}">
+                <h3>{'✅ 年度目標達成状況' if growth_rate > 0 else '⚠️ 注意ポイント' if growth_rate >= -2 else '🚨 緊急対応事項'}</h3>
+                <ul>
+                    <li>前年度同期比{growth_rate:+.1f}%{'の順調な増加' if growth_rate > 0 else 'で要改善'}</li>
+                    <li>手術室稼働率{utilization:.1f}%は{'適正水準' if utilization >= 80 else '改善余地あり'}</li>
+                    <li>年度末予測{yearly_data.get('projected_annual', 0):,}件{'は過去最高水準' if growth_rate > 10 else 'の実現を目指す'}</li>
+                    <li>{'継続的な成長基調を維持' if growth_rate > 5 else '更なる取り組み強化が必要'}</li>
+                </ul>
+            </div>
+            """
+            
+            action_plan = f"""
+            <div class="analysis-card {action_class}">
+                <h3>🎯 目標達成施策</h3>
+                <ul>
+                    <li>手術室稼働率を{max(85, utilization + 5):.0f}%以上に向上させる</li>
+                    <li>診療科間の手術枠最適化を実施する</li>
+                    <li>緊急手術体制の強化を検討する</li>
+                    <li>年度末目標：{int(yearly_data.get('projected_annual', 0) * 1.03):,}件を目指す</li>
+                    <li>{'現在の成長ペースを維持する' if growth_rate > 5 else 'パフォーマンス向上策を強化する'}</li>
+                </ul>
+            </div>
+            """
             
             # KPI要約カード
             kpi_summary = f"""
@@ -831,113 +863,10 @@ class SurgeryGitHubPublisher:
             </div>
             """
             
-            # 分析結果の判定
-            improvement_class = "success" if growth_rate > 0 else "warning" if growth_rate >= -2 else "danger"
-            action_class = "info"
-            
-            # 現状分析
-            current_analysis = f"""
-            <div class="analysis-card {improvement_class}">
-                <h3>{'✅ 年度目標達成状況' if growth_rate > 0 else '⚠️ 注意ポイント' if growth_rate >= -2 else '🚨 緊急対応事項'}</h3>
-                <ul>
-                    <li>前年度同期比{growth_rate:+.1f}%{'の順調な増加' if growth_rate > 0 else 'で要改善'}</li>
-                    <li>手術室稼働率{utilization:.1f}%は{'適正水準' if utilization >= 80 else '改善余地あり'}</li>
-                    <li>年度末予測{yearly_data.get('projected_annual', 0):,}件{'は過去最高水準' if growth_rate > 10 else 'の実現を目指す'}</li>
-                    <li>{'継続的な成長基調を維持' if growth_rate > 5 else '更なる取り組み強化が必要'}</li>
-                </ul>
-            </div>
-            """
-            
-            # 具体的改善提案
-            improvement_proposals = f"""
-            <div class="analysis-card {action_class}">
-                <h3>🎯 具体的改善提案</h3>
-                <ul>
-                    <li><strong>短期施策（1-3ヶ月）</strong>
-                        <ul>
-                            <li>手術室稼働率を{max(85, utilization + 5):.0f}%以上に向上</li>
-                            <li>診療科間の手術枠最適化を実施</li>
-                            <li>緊急手術対応体制の見直し</li>
-                        </ul>
-                    </li>
-                    <li><strong>中期施策（3-6ヶ月）</strong>
-                        <ul>
-                            <li>週次目標達成診療科を3科以上に増加</li>
-                            <li>平日手術件数の安定化を図る</li>
-                            <li>手術室運用効率の向上策を実施</li>
-                        </ul>
-                    </li>
-                    <li><strong>長期目標（6-12ヶ月）</strong>
-                        <ul>
-                            <li>年度末目標：{int(yearly_data.get('projected_annual', 0) * 1.05):,}件を目指す</li>
-                            <li>診療科別パフォーマンス向上プログラム導入</li>
-                            <li>{'現在の成長ペースを維持・拡大' if growth_rate > 5 else 'パフォーマンス向上策の強化'}</li>
-                        </ul>
-                    </li>
-                </ul>
-            </div>
-            """
-            
-            # 重点課題と対策
-            key_challenges = f"""
-            <div class="analysis-card warning">
-                <h3>⚡ 重点課題と対策</h3>
-                <ul>
-                    <li><strong>稼働率向上</strong>
-                        <ul>
-                            <li>現在{utilization:.1f}% → 目標85%以上</li>
-                            <li>手術室配分の最適化が必要</li>
-                            <li>待機時間短縮による効率化</li>
-                        </ul>
-                    </li>
-                    <li><strong>診療科間格差解消</strong>
-                        <ul>
-                            <li>高パフォーマンス科のベストプラクティス共有</li>
-                            <li>目標未達成科への個別支援強化</li>
-                            <li>診療科横断的な連携促進</li>
-                        </ul>
-                    </li>
-                    <li><strong>品質維持</strong>
-                        <ul>
-                            <li>件数増加と安全性の両立</li>
-                            <li>医療スタッフの負荷軽減策</li>
-                            <li>継続的な研修・教育体制</li>
-                        </ul>
-                    </li>
-                </ul>
-            </div>
-            """
-            
-            # 成功指標
-            success_metrics = f"""
-            <div class="analysis-card success">
-                <h3>📈 成功指標・KPI</h3>
-                <ul>
-                    <li><strong>定量指標</strong>
-                        <ul>
-                            <li>月間全身麻酔手術件数: 420件以上</li>
-                            <li>手術室稼働率: 85%以上</li>
-                            <li>診療科目標達成率: 80%以上</li>
-                            <li>前年同期比成長率: +5%以上</li>
-                        </ul>
-                    </li>
-                    <li><strong>定性指標</strong>
-                        <ul>
-                            <li>診療科間の連携強化</li>
-                            <li>手術チームの満足度向上</li>
-                            <li>患者待機時間の短縮</li>
-                            <li>医療安全指標の維持・向上</li>
-                        </ul>
-                    </li>
-                </ul>
-            </div>
-            """
-            
             return f"""
             <div id="analysis" class="view-content">
                 <div class="summary">
                     <h2>📈 詳細分析・改善提案</h2>
-                    <p>現状分析と具体的な改善施策をご提案いたします</p>
                 </div>
                 
                 <div class="grid-container" style="grid-template-columns: 1fr;">
@@ -945,18 +874,10 @@ class SurgeryGitHubPublisher:
                 </div>
                 
                 <div class="analysis-section">
-                    <h2>📊 現状分析</h2>
+                    <h2>📊 年度目標達成分析</h2>
                     <div class="analysis-grid">
-                        {current_analysis}
-                        {key_challenges}
-                    </div>
-                </div>
-                
-                <div class="analysis-section">
-                    <h2>🚀 改善施策・実行計画</h2>
-                    <div class="analysis-grid">
-                        {improvement_proposals}
-                        {success_metrics}
+                        {improvement_analysis}
+                        {action_plan}
                     </div>
                 </div>
             </div>
@@ -964,209 +885,16 @@ class SurgeryGitHubPublisher:
             
         except Exception as e:
             logger.error(f"詳細分析タブ生成エラー: {e}")
-            return f"""
-            <div id="analysis" class="view-content">
-                <div class="analysis-card danger">
-                    <h3>❌ 詳細分析データ読み込みエラー</h3>
-                    <ul>
-                        <li>分析データの読み込み中にエラーが発生しました</li>
-                        <li>基本KPIデータと年度比較データを確認してください</li>
-                        <li>エラー詳細: {str(e)}</li>
-                    </ul>
-                </div>
-            </div>
-            """
+            return '<div id="analysis" class="view-content"><p>詳細分析データの読み込みでエラーが発生しました</p></div>'
 
-    # 週別推移チャート関連の関数を追加
-    def _get_weekly_trend_data(self, df: pd.DataFrame, latest_date: pd.Timestamp) -> list:
-        """週別トレンドデータを取得"""
-        try:
-            from analysis.weekly import get_weekly_trend_data
-            return get_weekly_trend_data(df, latest_date, weeks=8)
-        except Exception as e:
-            logger.error(f"週別トレンドデータ取得エラー: {e}")
-            return []
-    
-    def _generate_weekly_trend_section(self, weekly_data: list) -> str:
-        """週別トレンドセクション生成（折れ線グラフ版、過去8週間表示）"""
-        try:
-            if not weekly_data:
-                return self._generate_fallback_weekly_chart()
-            
-            import json
-            from analysis.weekly import get_weekly_target_value
-            
-            labels = [item['week_name'] for item in weekly_data]
-            values = [int(item['count']) for item in weekly_data]
-            
-            target_value = get_weekly_target_value()  # 95件
-            target_line = [target_value] * len(labels)
-            
-            # 前年同月週平均値データ
-            prev_year_values = [
-                float(item['prev_year_month_avg']) if item.get('prev_year_month_avg') is not None else None 
-                for item in weekly_data
-            ]
 
-            # Y軸の最大値・最小値をデータに合わせて動的に設定
-            all_plot_values = [v for v in values if v is not None] + \
-                              [v for v in prev_year_values if v is not None] + \
-                              [target_value]
-            
-            if not all_plot_values:
-                min_value, max_value = 0, 120
-            else:
-                data_min = min(all_plot_values)
-                data_max = max(all_plot_values)
-                padding = (data_max - data_min) * 0.15 if (data_max - data_min) > 0 else 10
-                min_value = int(max(0, data_min - padding))
-                max_value = int(data_max + padding)
-
-            html_content = f'''
-            <div class="trend-chart">
-                <h3>📊 週別推移（全身麻酔手術件数 - 過去8週間）</h3>
-                <div style="position: relative; height: 300px; margin: 20px 0;">
-                    <canvas id="weeklyTrendChart"></canvas>
-                </div>
-                <p style="text-align: center; color: #666; font-size: 12px;">
-                    実線：当週実績 | 点線：前年同月週平均 | 破線：目標ライン（週{target_value}件）
-                </p>
-            </div>
-            
-            <script>
-            (function() {{
-                function initWeeklyChart() {{
-                    const ctx = document.getElementById('weeklyTrendChart');
-                    if (!ctx) {{
-                        setTimeout(initWeeklyChart, 100);
-                        return;
-                    }}
-                    
-                    const chartData = {{
-                        labels: {json.dumps(labels, ensure_ascii=False)},
-                        datasets: [
-                            {{
-                                label: '当週実績',
-                                data: {json.dumps(values)},
-                                borderColor: 'rgb(34, 197, 94)',
-                                backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                                borderWidth: 3,
-                                tension: 0.1,
-                                pointRadius: 5,
-                                pointBackgroundColor: 'rgb(34, 197, 94)',
-                            }},
-                            {{
-                                label: '前年同月週平均',
-                                data: {json.dumps(prev_year_values)},
-                                borderColor: 'rgb(156, 163, 175)',
-                                backgroundColor: 'rgba(156, 163, 175, 0.1)',
-                                borderWidth: 2,
-                                borderDash: [5, 5],
-                                tension: 0.1,
-                                pointRadius: 4,
-                                spanGaps: true,
-                                pointBackgroundColor: 'rgb(156, 163, 175)',
-                            }},
-                            {{
-                                label: '目標ライン',
-                                data: {json.dumps(target_line)},
-                                borderColor: 'rgb(239, 68, 68)',
-                                borderWidth: 2,
-                                borderDash: [10, 5],
-                                pointRadius: 0,
-                                fill: false
-                            }}
-                        ]
-                    }};
-                    
-                    const chartOptions = {{
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {{
-                            legend: {{
-                                display: true,
-                                position: 'top',
-                            }},
-                            tooltip: {{
-                                mode: 'index',
-                                intersect: false,
-                                callbacks: {{
-                                    label: function(context) {{
-                                        let label = context.dataset.label || '';
-                                        if (label) {{
-                                            label += ': ';
-                                        }}
-                                        if (context.parsed.y !== null) {{
-                                            label += context.parsed.y + '件';
-                                        }}
-                                        return label;
-                                    }}
-                                }}
-                            }}
-                        }},
-                        scales: {{
-                            y: {{
-                                display: true,
-                                suggestedMin: {min_value},
-                                suggestedMax: {max_value},
-                                grid: {{
-                                    color: 'rgba(0, 0, 0, 0.05)'
-                                }},
-                                ticks: {{
-                                    callback: function(value) {{
-                                        return Math.round(value) + '件';
-                                    }}
-                                }}
-                            }}
-                        }},
-                        interaction: {{
-                            mode: 'nearest',
-                            axis: 'x',
-                            intersect: false
-                        }}
-                    }};
-                    
-                    new Chart(ctx, {{
-                        type: 'line',
-                        data: chartData,
-                        options: chartOptions
-                    }});
-                }}
-                
-                if (document.readyState === 'loading') {{
-                    document.addEventListener('DOMContentLoaded', initWeeklyChart);
-                }} else {{
-                    setTimeout(initWeeklyChart, 100);
-                }}
-            }})();
-            </script>
-            '''
-            
-            return html_content
-            
-        except Exception as e:
-            logger.error(f"週別トレンドセクション生成エラー: {e}")
-            return self._generate_fallback_weekly_chart()
-    
-    def _generate_fallback_weekly_chart(self) -> str:
-        """フォールバック用の週別チャート表示"""
-        return """
-        <div class="trend-chart">
-            <h3>📊 週別推移（全身麻酔手術件数 - 過去8週間）</h3>
-            <p style="text-align: center; padding: 40px; color: #666;">
-                週別トレンドデータを準備中...
-            </p>
-        </div>
-        """
-
-    # 月別推移チャート関連の関数（既存）
     def _get_monthly_trend_data(self, df: pd.DataFrame, yearly_data: Dict[str, Any]) -> list:
         """実データに基づく月別トレンドデータ取得（遡って6ヶ月、前年同日比較）"""
         try:
             if df.empty:
                 return []
 
-            # 日付列をdatetime型に変換
+            # 日付列をdatetime型に変換（エラーを無視）
             df['手術実施日_dt'] = pd.to_datetime(df['手術実施日_dt'], errors='coerce')
             df.dropna(subset=['手術実施日_dt'], inplace=True)
             
@@ -1176,11 +904,12 @@ class SurgeryGitHubPublisher:
             
             # 常に遡って6ヶ月分のデータを表示
             for i in range(6):
+                # 基準となる月を計算 (5ヶ月前から現在月まで)
                 target_month_date = latest_date - pd.DateOffset(months=i)
                 current_year = target_month_date.year
                 current_month = target_month_date.month
 
-                # 全身麻酔手術のみをフィルタリング
+                # is_gas_20min列がTrueのデータのみをフィルタリング
                 gas_df = df[df['is_gas_20min'] == True]
 
                 # 今年度データの取得
@@ -1277,6 +1006,7 @@ class SurgeryGitHubPublisher:
                 </p>
             </div>
             
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
             <script>
             (function() {{
                 function initChart() {{
@@ -1307,7 +1037,7 @@ class SurgeryGitHubPublisher:
                                 borderDash: [5, 5],
                                 tension: 0.1,
                                 pointRadius: 4,
-                                spanGaps: true,
+                                spanGaps: true, // null値を線で繋がない
                             }},
                             {{
                                 label: '目標ライン',
@@ -1389,17 +1119,57 @@ class SurgeryGitHubPublisher:
         except Exception as e:
             logger.error(f"月別トレンドセクション生成エラー: {e}")
             return self._generate_fallback_trend_chart(yearly_data)
+            
 
     def _generate_fallback_trend_chart(self, yearly_data: Dict[str, Any]) -> str:
         """フォールバック用の棒グラフ表示"""
-        return """
-        <div class="trend-chart">
-            <h3>📈 月別推移（全身麻酔手術件数）</h3>
-            <p style="text-align: center; padding: 40px; color: #666;">
-                月別トレンドデータを準備中...
-            </p>
-        </div>
-        """
+        try:
+            # yearly_dataから直接月別データを取得できる場合
+            monthly_trend = yearly_data.get('monthly_trend', [])
+            
+            if not monthly_trend:
+                return """
+                <div class="trend-chart">
+                    <h3>📈 月別推移（全身麻酔手術件数）</h3>
+                    <p style="text-align: center; padding: 40px; color: #666;">
+                        月別トレンドデータを準備中...
+                    </p>
+                </div>
+                """
+            
+            # 最大値を取得してバーの高さを正規化
+            max_count = max(int(item.get('count', 0)) for item in monthly_trend)
+            if max_count == 0:
+                max_count = 100
+            
+            bars_html = ""
+            for item in monthly_trend[-4:]:  # 直近4ヶ月分を表示
+                count = int(item.get('count', 0))
+                height_percent = (count / max_count * 100) if max_count > 0 else 0
+                month_name = item.get('month_name', item.get('month', ''))
+                
+                bars_html += f'''
+                <div class="trend-bar" style="height: {height_percent}%;">
+                    <div class="trend-bar-value">{count}</div>
+                    <div class="trend-bar-label">{month_name}</div>
+                </div>
+                '''
+            
+            return f'''
+            <div class="trend-chart">
+                <h3>📈 月別推移（全身麻酔手術件数）</h3>
+                <div class="trend-bars">
+                    {bars_html}
+                </div>
+                <p style="text-align: center; color: #666; font-size: 12px;">
+                    青：今年度実績 | 目標ペース：月平均{yearly_data.get('monthly_target', 420)}件
+                </p>
+            </div>
+            '''
+            
+        except Exception as e:
+            logger.error(f"フォールバックチャート生成エラー: {e}")
+            return ""
 
     def _generate_javascript_functions(self) -> str:
         """JavaScript関数生成（情報パネル機能追加版）"""
@@ -1487,7 +1257,8 @@ class SurgeryGitHubPublisher:
     
     def _get_integrated_dashboard_css(self) -> str:
         """手術分析ダッシュボード用CSS（情報パネル追加版）"""
-        return """
+        # 既存のCSSはそのまま残す
+        base_css = """
             :root {
                 /* === 統一カラーパレット === */
                 --primary-color: #667eea;
@@ -1550,125 +1321,6 @@ class SurgeryGitHubPublisher:
                 max-width: 1200px;
                 margin: 0 auto;
                 padding: 0 20px;
-            }
-            
-            /* === 情報ボタン === */
-            .info-button {
-                position: absolute;
-                top: 20px;
-                right: 20px;
-                background: var(--primary-color);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-size: 14px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: var(--transition);
-                box-shadow: var(--shadow-sm);
-            }
-            
-            .info-button:hover {
-                background: var(--primary-dark);
-                transform: translateY(-2px);
-                box-shadow: var(--shadow-md);
-            }
-            
-            /* === 情報パネルオーバーレイ === */
-            .info-overlay {
-                display: none;
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0, 0, 0, 0.5);
-                z-index: 999;
-                animation: fadeIn 0.3s ease;
-            }
-            
-            /* === 情報パネル === */
-            .info-panel {
-                display: none;
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 90%;
-                max-width: 800px;
-                max-height: 80vh;
-                background: white;
-                border-radius: 16px;
-                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
-                z-index: 1000;
-                overflow: hidden;
-                animation: slideIn 0.3s ease;
-            }
-            
-            @keyframes slideIn {
-                from {
-                    transform: translate(-50%, -45%);
-                    opacity: 0;
-                }
-                to {
-                    transform: translate(-50%, -50%);
-                    opacity: 1;
-                }
-            }
-            
-            .info-panel-header {
-                background: var(--primary-color);
-                color: white;
-                padding: 20px 24px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
-            
-            .info-panel-header h2 {
-                margin: 0;
-                font-size: 1.4em;
-                font-weight: 700;
-            }
-            
-            .close-button {
-                background: none;
-                border: none;
-                color: white;
-                font-size: 24px;
-                cursor: pointer;
-                padding: 0;
-                width: 32px;
-                height: 32px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                border-radius: 4px;
-                transition: background 0.2s;
-            }
-            
-            .close-button:hover {
-                background: rgba(255, 255, 255, 0.2);
-            }
-            
-            .info-panel-content {
-                padding: 24px;
-                overflow-y: auto;
-                max-height: calc(80vh - 80px);
-            }
-            
-            .info-section {
-                margin-bottom: 32px;
-            }
-            
-            .info-section h3 {
-                color: var(--text-primary);
-                margin-bottom: 16px;
-                font-size: 1.2em;
-                font-weight: 600;
-                border-bottom: 2px solid #E5E7EB;
-                padding-bottom: 8px;
             }
             
             /* === タブナビゲーション === */
@@ -1901,6 +1553,109 @@ class SurgeryGitHubPublisher:
                 font-weight: 500;
             }
             
+            /* === 年度比較カード === */
+            .yearly-comparison-card {
+                background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+                color: white;
+                border-radius: 16px;
+                padding: 32px;
+                margin-bottom: 32px;
+                box-shadow: var(--shadow-lg);
+                position: relative;
+                overflow: hidden;
+            }
+            
+            .yearly-comparison-card::before {
+                content: '';
+                position: absolute;
+                top: -50%;
+                right: -20%;
+                width: 100%;
+                height: 200%;
+                background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+                pointer-events: none;
+            }
+            
+            .yearly-card-header {
+                display: flex;
+                align-items: center;
+                margin-bottom: 24px;
+                position: relative;
+                z-index: 1;
+            }
+            
+            .yearly-card-icon {
+                font-size: 32px;
+                margin-right: 16px;
+            }
+            
+            .yearly-card-title {
+                font-size: 20px;
+                font-weight: 700;
+            }
+            
+            .yearly-card-subtitle {
+                font-size: 14px;
+                opacity: 0.9;
+                margin-top: 4px;
+            }
+            
+            .yearly-comparison-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 20px;
+                margin-bottom: 24px;
+                position: relative;
+                z-index: 1;
+            }
+            
+            .yearly-metric {
+                text-align: center;
+                padding: 20px;
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: var(--border-radius);
+                backdrop-filter: blur(10px);
+            }
+            
+            .yearly-metric-label {
+                font-size: 12px;
+                opacity: 0.9;
+                margin-bottom: 8px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            
+            .yearly-metric-value {
+                font-size: 28px;
+                font-weight: 700;
+                margin-bottom: 4px;
+            }
+            
+            .yearly-metric-period {
+                font-size: 11px;
+                opacity: 0.8;
+            }
+            
+            .yearly-comparison-result {
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: var(--border-radius);
+                padding: 20px;
+                text-align: center;
+                position: relative;
+                z-index: 1;
+            }
+            
+            .yearly-change-value {
+                font-size: 36px;
+                font-weight: 700;
+                margin-bottom: 8px;
+            }
+            
+            .yearly-change-label {
+                font-size: 14px;
+                opacity: 0.9;
+            }
+            
             /* === ハイスコアランキング === */
             .stats-highlight {
                 background: #F9FAFB;
@@ -1996,7 +1751,7 @@ class SurgeryGitHubPublisher:
                 text-align: right;
             }
             
-            /* === トレンドチャート === */
+            /* === 月別トレンドチャート === */
             .trend-chart {
                 background: white;
                 border-radius: var(--border-radius);
@@ -2013,7 +1768,7 @@ class SurgeryGitHubPublisher:
                 font-weight: 600;
             }
             
-            #monthlyTrendChart, #weeklyTrendChart {
+            #monthlyTrendChart {
                 max-width: 100%;
                 height: 100%;
             }
@@ -2043,22 +1798,17 @@ class SurgeryGitHubPublisher:
                 border: 1px solid #F3F4F6;
             }
             
-            .analysis-card.success {
+            .analysis-card.improvement {
                 border-left-color: var(--success-color);
                 background: rgba(16, 185, 129, 0.05);
             }
             
-            .analysis-card.warning {
+            .analysis-card.concern {
                 border-left-color: var(--warning-color);
                 background: rgba(245, 158, 11, 0.05);
             }
             
-            .analysis-card.danger {
-                border-left-color: var(--danger-color);
-                background: rgba(239, 68, 68, 0.05);
-            }
-            
-            .analysis-card.info {
+            .analysis-card.action {
                 border-left-color: var(--info-color);
                 background: rgba(59, 130, 246, 0.05);
             }
@@ -2127,6 +1877,15 @@ class SurgeryGitHubPublisher:
                     min-height: 120px;
                 }
                 
+                .yearly-comparison-card {
+                    padding: 24px;
+                }
+                
+                .yearly-comparison-grid {
+                    grid-template-columns: 1fr;
+                    gap: 16px;
+                }
+                
                 .summary-stats {
                     grid-template-columns: 1fr;
                     gap: 12px;
@@ -2143,7 +1902,491 @@ class SurgeryGitHubPublisher:
                 .ranking-card {
                     padding: 20px;
                 }
+            }
+            
+            @media (max-width: 480px) {
+                .header h1 {
+                    font-size: 1.5em;
+                }
                 
+                .metric-card {
+                    padding: 14px;
+                }
+                
+                .yearly-comparison-card {
+                    padding: 20px;
+                }
+                
+                .yearly-metric {
+                    padding: 16px;
+                }
+                
+                .yearly-metric-value {
+                    font-size: 24px;
+                }
+                
+                .score-value {
+                    font-size: 1.8em;
+                }
+                
+                .dept-name {
+                    font-size: 1.2em;
+                }
+            }
+            """
+        
+        # 情報パネル用の追加CSS
+        info_panel_css = """
+            /* === 情報ボタン === */
+            .info-button {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                background: var(--primary-color);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: var(--transition);
+                box-shadow: var(--shadow-sm);
+            }
+            
+            .info-button:hover {
+                background: var(--primary-dark);
+                transform: translateY(-2px);
+                box-shadow: var(--shadow-md);
+            }
+            
+            /* === 情報パネルオーバーレイ === */
+            .info-overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 999;
+                animation: fadeIn 0.3s ease;
+            }
+            
+            /* === 情報パネル === */
+            .info-panel {
+                display: none;
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 90%;
+                max-width: 800px;
+                max-height: 80vh;
+                background: white;
+                border-radius: 16px;
+                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+                z-index: 1000;
+                overflow: hidden;
+                animation: slideIn 0.3s ease;
+            }
+            
+            @keyframes slideIn {
+                from {
+                    transform: translate(-50%, -45%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translate(-50%, -50%);
+                    opacity: 1;
+                }
+            }
+            
+            .info-panel-header {
+                background: var(--primary-color);
+                color: white;
+                padding: 20px 24px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            
+            .info-panel-header h2 {
+                margin: 0;
+                font-size: 1.4em;
+                font-weight: 700;
+            }
+            
+            .close-button {
+                background: none;
+                border: none;
+                color: white;
+                font-size: 24px;
+                cursor: pointer;
+                padding: 0;
+                width: 32px;
+                height: 32px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 4px;
+                transition: background 0.2s;
+            }
+            
+            .close-button:hover {
+                background: rgba(255, 255, 255, 0.2);
+            }
+            
+            .info-panel-content {
+                padding: 24px;
+                overflow-y: auto;
+                max-height: calc(80vh - 80px);
+            }
+            
+            .info-section {
+                margin-bottom: 32px;
+            }
+            
+            .info-section h3 {
+                color: var(--text-primary);
+                margin-bottom: 16px;
+                font-size: 1.2em;
+                font-weight: 600;
+                border-bottom: 2px solid #E5E7EB;
+                padding-bottom: 8px;
+            }
+            
+            /* === 評価基準グリッド === */
+            .criteria-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 16px;
+            }
+            
+            .criteria-card {
+                background: #F9FAFB;
+                border-radius: 8px;
+                padding: 16px;
+                border: 1px solid #E5E7EB;
+            }
+            
+            .criteria-card h4 {
+                margin: 0 0 12px 0;
+                color: var(--text-primary);
+                font-size: 1em;
+                font-weight: 600;
+            }
+            
+            .criteria-card ul {
+                margin: 0;
+                padding-left: 0;
+                list-style: none;
+            }
+            
+            .criteria-card li {
+                margin-bottom: 8px;
+                font-size: 14px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            /* === バッジ === */
+            .badge {
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: 600;
+                color: white;
+                min-width: 60px;
+                text-align: center;
+            }
+            
+            .badge.success { background: var(--success-color); }
+            .badge.info { background: var(--info-color); }
+            .badge.warning { background: var(--warning-color); }
+            .badge.danger { background: var(--danger-color); }
+            
+            /* === スコア計算説明セクション === */
+            .score-calculation-section {
+                background: #FEF3C7;
+                border-radius: 12px;
+                padding: 24px;
+                border: 1px solid #FCD34D;
+                margin-bottom: 32px;
+            }
+            
+            .score-explanation {
+                margin-top: 16px;
+            }
+            
+            .score-intro {
+                font-size: 15px;
+                color: var(--text-primary);
+                margin-bottom: 24px;
+                font-weight: 500;
+            }
+            
+            .score-component {
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 16px;
+                border: 1px solid #E5E7EB;
+                box-shadow: var(--shadow-sm);
+            }
+            
+            .score-component h4 {
+                margin: 0 0 16px 0;
+                color: var(--primary-color);
+                font-size: 1.1em;
+                font-weight: 600;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            .score-detail {
+                margin-left: 16px;
+            }
+            
+            .score-detail p {
+                margin: 8px 0;
+                font-size: 14px;
+                color: var(--text-secondary);
+            }
+            
+            .score-detail code {
+                display: inline-block;
+                background: #F3F4F6;
+                padding: 4px 12px;
+                border-radius: 4px;
+                font-family: 'Courier New', monospace;
+                font-size: 13px;
+                color: #374151;
+                border: 1px solid #E5E7EB;
+                margin: 8px 0;
+            }
+            
+            .score-breakdown {
+                margin-top: 16px;
+                background: #F9FAFB;
+                border-radius: 6px;
+                padding: 16px;
+            }
+            
+            .score-breakdown h5 {
+                margin: 0 0 12px 0;
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            
+            .score-breakdown ul {
+                margin: 0;
+                padding-left: 20px;
+            }
+            
+            .score-breakdown > ul > li {
+                margin-bottom: 12px;
+                font-size: 14px;
+                color: var(--text-primary);
+            }
+            
+            .score-breakdown ul ul {
+                margin-top: 4px;
+                margin-bottom: 0;
+            }
+            
+            .score-breakdown ul ul li {
+                margin-bottom: 4px;
+                font-size: 13px;
+                color: var(--text-secondary);
+            }
+            
+            .total-score-summary {
+                background: var(--primary-color);
+                color: white;
+                border-radius: 8px;
+                padding: 20px;
+                text-align: center;
+                margin-top: 24px;
+            }
+            
+            .total-score-summary h4 {
+                margin: 0 0 8px 0;
+                color: white;
+                font-size: 1.1em;
+                font-weight: 700;
+            }
+            
+            .score-note {
+                margin: 0;
+                font-size: 14px;
+                opacity: 0.9;
+            }
+            
+            /* === グレードシステム === */
+            .grade-system {
+                background: #F9FAFB;
+                border-radius: 8px;
+                padding: 16px;
+                margin-top: 16px;
+            }
+            
+            .grade-system h5 {
+                margin: 0 0 12px 0;
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            
+            .grade-list {
+                margin: 0;
+                padding: 0;
+                list-style: none;
+            }
+            
+            .grade-list li {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 8px;
+                font-size: 14px
+            }
+        
+            .grade-badge {
+                display: inline-block;
+                width: 24px;
+                height: 24px;
+                border-radius: 50%;
+                text-align: center;
+                line-height: 24px;
+                font-weight: 700;
+                font-size: 14px;
+                color: white;
+            }
+            
+            .grade-badge.grade-s {
+                background: linear-gradient(135deg, #FFD700, #FFA500);
+                box-shadow: 0 2px 4px rgba(255, 215, 0, 0.4);
+            }
+            
+            .grade-badge.grade-a {
+                background: #DC143C;
+            }
+            
+            .grade-badge.grade-b {
+                background: #4169E1;
+            }
+            
+            .grade-badge.grade-c {
+                background: #32CD32;
+            }
+            
+            .grade-badge.grade-d {
+                background: #708090;
+            }
+            
+            .calculation-note {
+                background: #FEF3C7;
+                border-radius: 6px;
+                padding: 12px;
+                margin-top: 12px;
+                border: 1px solid #FCD34D;
+            }
+            
+            .calculation-note p {
+                margin: 0 0 8px 0;
+                font-weight: 600;
+                color: #92400E;
+            }
+            
+            .calculation-note ul {
+                margin: 0;
+                padding-left: 20px;
+            }
+            
+            .calculation-note li {
+                font-size: 13px;
+                color: #78350F;
+            }
+            
+            /* === 用語リスト === */
+            .term-list {
+                background: #F9FAFB;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 0;
+            }
+            
+            .term-list dt {
+                font-weight: 600;
+                color: var(--text-primary);
+                margin-bottom: 4px;
+                font-size: 15px;
+            }
+            
+            .term-list dd {
+                color: var(--text-secondary);
+                margin: 0 0 16px 0;
+                padding-left: 16px;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+            
+            /* === 計算式リスト === */
+            .formula-list {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+            
+            .formula-item {
+                background: #F9FAFB;
+                border-radius: 8px;
+                padding: 12px 16px;
+                border: 1px solid #E5E7EB;
+            }
+            
+            .formula-item strong {
+                display: block;
+                color: var(--text-primary);
+                margin-bottom: 4px;
+                font-size: 14px;
+            }
+            
+            .formula-item code {
+                display: block;
+                background: white;
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-family: 'Courier New', monospace;
+                font-size: 13px;
+                color: #374151;
+                border: 1px solid #E5E7EB;
+            }
+            
+            /* === ヒントリスト === */
+            .tips-list {
+                background: #F0F9FF;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 0;
+                border: 1px solid #BFDBFE;
+            }
+            
+            .tips-list li {
+                color: #1E40AF;
+                margin-bottom: 12px;
+                padding-left: 8px;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+            
+            /* === レスポンシブ対応（情報パネル） === */
+            @media (max-width: 768px) {
                 .info-button {
                     top: 60px;
                     right: 16px;
@@ -2160,26 +2403,30 @@ class SurgeryGitHubPublisher:
                     padding: 16px;
                     max-height: calc(90vh - 70px);
                 }
-            }
-            
-            @media (max-width: 480px) {
-                .header h1 {
-                    font-size: 1.5em;
+                
+                .criteria-grid {
+                    grid-template-columns: 1fr;
                 }
                 
-                .metric-card {
-                    padding: 14px;
+                .formula-item code {
+                    font-size: 11px;
+                    padding: 6px 8px;
+                    word-break: break-all;
                 }
                 
-                .score-value {
-                    font-size: 1.8em;
+                .score-component {
+                    padding: 16px;
                 }
                 
-                .dept-name {
-                    font-size: 1.2em;
+                .score-breakdown {
+                    padding: 12px;
                 }
             }
             """
+        
+        # 既存のCSSと情報パネル用CSSを結合して返す
+        return base_css + info_panel_css
+
 
     # === 既存関数（変更なし） ===
     
@@ -2253,11 +2500,14 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
+          # このリポジトリのルートディレクトリをアップロード対象にする
           path: '.'
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
 """
+
 
         workflow_path = ".github/workflows/pages.yml"
         self._upload_file(workflow_path, workflow_content, skip_ci=skip_ci)
@@ -2304,7 +2554,7 @@ def create_surgery_github_publisher_interface():
         
         repo_name = st.sidebar.text_input(
             "リポジトリ名",
-            value=saved_settings.get('repo_name', 'Streamlit-OR-Dashboard'),
+            value=saved_settings.get('repo_name', 'Streamlit-Surgery-Dashboard'),
             help="公開用リポジトリ名",
             key="surgery_repo_name"
         )
@@ -2325,7 +2575,7 @@ def create_surgery_github_publisher_interface():
             index=2,
             key="surgery_publish_period"
         )
-
+        
         # 接続テスト
         if st.sidebar.button("🔌 接続テスト", key="test_connection"):
             if github_token and repo_owner and repo_name:
@@ -2337,7 +2587,7 @@ def create_surgery_github_publisher_interface():
                     st.sidebar.error(f"❌ {message}")
             else:
                 st.sidebar.error("すべての項目を入力してください")
-
+        
         # 公開実行
         st.sidebar.markdown("**📤 手術分析ダッシュボード公開**")
         st.sidebar.info("🏥 病院全体手術サマリ（年度比較付き）\n🏆 ハイスコア TOP3\n📊 診療科別パフォーマンス\n📈 詳細分析")
@@ -2348,28 +2598,19 @@ def create_surgery_github_publisher_interface():
             elif not repo_owner or not repo_name:
                 st.sidebar.error("リポジトリ情報を入力してください")
             else:
-                with st.spinner("手術分析ダッシュボードを公開中..."):
+                with st.spinner("手術手術ダッシュボードを公開中..."):
                     publisher = SurgeryGitHubPublisher(
                         github_token, repo_owner, repo_name, branch
                     )
                     
-                    # SessionManagerから共通の分析基準日を取得
-                    analysis_base_date = SessionManager.get_analysis_base_date()
-
-                    # 基準日が設定されていない場合は、データ内の最新日をフォールバックとして使用
-                    if analysis_base_date is None and not df.empty:
-                        analysis_base_date = df['手術実施日_dt'].max()
-                    
-                    if analysis_base_date is None:
-                        st.sidebar.error("分析基準日が設定されていません。")
-                        return
-
                     success, message = publisher.publish_surgery_dashboard(
-                        df, target_dict, period, "integrated_dashboard", analysis_base_date
+                        df, target_dict, period, "integrated_dashboard"
                     )
                     
                     if success:
                         st.sidebar.success(f"✅ {message}")
+                        
+                        # 設定を保存
                         save_github_settings(repo_owner, repo_name, branch)
                     else:
                         st.sidebar.error(f"❌ {message}")
@@ -2399,6 +2640,8 @@ def create_surgery_github_publisher_interface():
         logger.error(f"手術GitHub公開インターフェースエラー: {e}")
         st.sidebar.error("GitHub公開機能でエラーが発生しました")
 
+
+# === 既存関数（変更なし） ===
 
 def test_github_connection(github_token: str, repo_owner: str, repo_name: str) -> Tuple[bool, str]:
     """GitHub接続テスト"""
