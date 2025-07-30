@@ -168,15 +168,13 @@ class SurgeryGitHubPublisher:
     def _generate_4tab_dashboard_html(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any],
                                     high_score_data: list, dept_performance: pd.DataFrame,
                                     period: str, recent_week_kpi: Dict[str, Any], 
-                                    latest_date: datetime) -> str: # <<< 引数に latest_date を追加
+                                    latest_date: datetime) -> str:
         """4タブダッシュボードHTML生成"""
         try:
             current_date = datetime.now().strftime('%Y年%m月%d日')
             
             return f"""<!DOCTYPE html>
 <html lang="ja">
-<head>
-    </head>
 <body>
     {self._generate_header_html()}
     
@@ -184,6 +182,7 @@ class SurgeryGitHubPublisher:
         {self._generate_tab_navigation_html()}
         
         {self._generate_hospital_summary_tab(yearly_data, basic_kpi, recent_week_kpi, latest_date)}
+        
         {self._generate_high_score_tab(high_score_data, period)}
         
         {self._generate_department_performance_tab(dept_performance)}
@@ -191,9 +190,10 @@ class SurgeryGitHubPublisher:
         {self._generate_analysis_tab(yearly_data, basic_kpi)}
     </div>
     
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     {self._generate_javascript_functions()}
     {self._generate_footer_html(current_date)}
-</body>
+    </body>
 </html>"""
 
         except Exception as e:
@@ -601,19 +601,23 @@ class SurgeryGitHubPublisher:
             monthly_trend_chart = self._generate_monthly_trend_section(yearly_data)
             
             if hasattr(self, 'df'):
-                # 引数で受け取った latest_date を使う
                 weekly_trend_data = self._get_weekly_trend_data(self.df, latest_date)
                 weekly_trend_chart = self._generate_weekly_trend_section(weekly_trend_data)
             else:
                 weekly_trend_chart = self._generate_fallback_weekly_chart()
             
+            # ▼▼▼ 変更箇所 ▼▼▼
+            # 2つのチャートを grid-container で囲む
             return f"""
             <div id="surgery-summary" class="view-content active">
                 {summary_html}
-                {monthly_trend_chart}
-                {weekly_trend_chart}
+                <div class="grid-container">
+                    {monthly_trend_chart}
+                    {weekly_trend_chart}
+                </div>
             </div>
             """
+            # ▲▲▲ 変更箇所 ▲▲▲
             
         except Exception as e:
             logger.error(f"病院サマリタブ生成エラー: {e}")
@@ -1022,7 +1026,6 @@ class SurgeryGitHubPublisher:
                 </p>
             </div>
             
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
             <script>
             (function() {{
                 function initChart() {{

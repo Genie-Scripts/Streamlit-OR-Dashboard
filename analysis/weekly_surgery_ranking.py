@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-
+@st.cache_data
 def calculate_weekly_surgery_ranking(df: pd.DataFrame, target_dict: Dict[str, float], 
                                    period: str = "直近12週") -> List[Dict[str, Any]]:
     """
