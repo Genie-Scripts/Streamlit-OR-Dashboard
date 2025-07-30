@@ -2623,12 +2623,13 @@ class SurgeryGitHubPublisher:
         """GitHubにHTMLファイルをアップロード"""
         try:
             # <<< 修正点 >>>
-            # docs/index.html のみにアップロードし、ワークフローを起動させる
-            # ルートの index.html と .nojekyll のアップロードは削除
+            # docs/index.html のみにアップロードする
             self._upload_file('docs/index.html', html_content, skip_ci=False)
             
-            # ワークフローファイルはこれまで通り確認・作成する
-            self._ensure_github_pages_workflow(skip_ci=True)
+            # <<< 修正点 >>>
+            # GitHub Actions用の設定ファイルを作成する処理は、
+            # 今回のシンプルな構成では不要なため削除します。
+            # self._ensure_github_pages_workflow(skip_ci=True)
             
             return True, "手術分析ダッシュボードの公開が完了しました"
         except Exception as e:
