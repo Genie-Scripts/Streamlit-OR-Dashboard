@@ -102,9 +102,6 @@ class SurgeryGitHubPublisher:
                                         period: str, latest_date: datetime) -> Optional[str]:
         """統合HTMLコンテンツを生成（4タブ構成）"""
         try:
-            # 【重要】引数でlatest_dateを受け取るので、ここでの取得は不要
-            # latest_date = df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns else datetime.now()
-            
             # 基本データ収集 (引数としてlatest_dateを渡す)
             basic_kpi = self._get_basic_kpi_data(df, latest_date)
             yearly_data = self._get_yearly_comparison_data(df, latest_date)
@@ -120,7 +117,7 @@ class SurgeryGitHubPublisher:
                 dept_performance=dept_performance,
                 period=period,
                 recent_week_kpi=recent_week_kpi,
-                latest_date=latest_date  # この行を追加
+                latest_date=latest_date
             )
             
         except Exception as e:
@@ -175,6 +172,12 @@ class SurgeryGitHubPublisher:
             
             return f"""<!DOCTYPE html>
 <html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏥 手術分析ダッシュボード</title>
+    <style>{self._get_integrated_dashboard_css()}</style>
+</head>
 <body>
     {self._generate_header_html()}
     
@@ -193,7 +196,7 @@ class SurgeryGitHubPublisher:
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     {self._generate_javascript_functions()}
     {self._generate_footer_html(current_date)}
-    </body>
+</body>
 </html>"""
 
         except Exception as e:
@@ -245,159 +248,9 @@ class SurgeryGitHubPublisher:
                         </tbody>
                     </table>
                 </div>
-                <div class="info-section">
-                    <h3>🎯 評価基準</h3>
-                </div>
-                
-                <div class="info-section score-calculation-section">
-                    <h3>🏆 ハイスコア計算方法（100点満点）</h3>
-                    <div class="score-explanation">
-                        <p class="score-intro">診療科ランキングの総合スコアは、以下の3つの指標から構成されています：</p>
-                        
-                        <div class="score-component">
-                            <h4>1. 🎯 全身麻酔手術件数（70点満点）- 最重要指標</h4>
-                            <div class="score-detail">
-                                <p>週単位の全身麻酔手術件数（麻酔時間20分以上）を多角的に評価します。</p>
-                                
-                                <div class="score-breakdown">
-                                    <h5>配点内訳：</h5>
-                                    <ul>
-                                        <li><strong>直近週達成度（30点）</strong>
-                                            <ul>
-                                                <li>CSV目標値に対する達成率で評価</li>
-                                                <li>達成率100%以上：30点</li>
-                                                <li>達成率90-99%：24点</li>
-                                                <li>達成率80-89%：18点</li>
-                                                <li>達成率70-79%：12点</li>
-                                                <li>達成率70%未満：0-6点</li>
-                                            </ul>
-                                        </li>
-                                        <li><strong>改善度（20点）</strong>
-                                            <ul>
-                                                <li>評価期間の平均と過去期間の平均を比較</li>
-                                                <li>改善率+20%以上：20点</li>
-                                                <li>改善率+10-19%：15点</li>
-                                                <li>改善率+5-9%：10点</li>
-                                                <li>改善率0-4%：5点</li>
-                                                <li>マイナス成長：0点</li>
-                                            </ul>
-                                        </li>
-                                        <li><strong>安定性（15点）</strong>
-                                            <ul>
-                                                <li>週次実績の変動係数で評価</li>
-                                                <li>変動係数10%未満：15点（非常に安定）</li>
-                                                <li>変動係数10-20%：12点（安定）</li>
-                                                <li>変動係数20-30%：8点（やや不安定）</li>
-                                                <li>変動係数30-40%：4点（不安定）</li>
-                                                <li>変動係数40%以上：0点（極めて不安定）</li>
-                                            </ul>
-                                        </li>
-                                        <li><strong>持続性（5点）</strong>
-                                            <ul>
-                                                <li>週次トレンドの傾きで評価</li>
-                                                <li>上昇トレンド：5点</li>
-                                                <li>横ばいトレンド：3点</li>
-                                                <li>下降トレンド：0点</li>
-                                            </ul>
-                                        </li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="score-component">
-                            <h4>2. 📊 全手術件数（15点満点）</h4>
-                            <div class="score-detail">
-                                <p>診療科の全体的な手術活動量を評価します。</p>
-                                
-                                <div class="score-breakdown">
-                                    <h5>配点内訳：</h5>
-                                    <ul>
-                                        <li><strong>診療科間ランキング（10点）</strong>
-                                            <ul>
-                                                <li>1位：10点</li>
-                                                <li>2位：8点</li>
-                                                <li>3位：6点</li>
-                                                <li>4位：4点</li>
-                                                <li>5位：2点</li>
-                                                <li>6位以下：0点</li>
-                                            </ul>
-                                        </li>
-                                        <li><strong>改善度（5点）</strong>
-                                            <ul>
-                                                <li>前期比+10%以上：5点</li>
-                                                <li>前期比+5-9%：3点</li>
-                                                <li>前期比0-4%：1点</li>
-                                                <li>前期比マイナス：0点</li>
-                                            </ul>
-                                        </li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="score-component">
-                            <h4>3. ⏱️ 総手術時間（15点満点）</h4>
-                            <div class="score-detail">
-                                <p>手術室の稼働効率と貢献度を評価します。</p>
-                                
-                                <div class="score-breakdown">
-                                    <h5>配点内訳：</h5>
-                                    <ul>
-                                        <li><strong>診療科間ランキング（10点）</strong>
-                                            <ul>
-                                                <li>1位：10点</li>
-                                                <li>2位：8点</li>
-                                                <li>3位：6点</li>
-                                                <li>4位：4点</li>
-                                                <li>5位：2点</li>
-                                                <li>6位以下：0点</li>
-                                            </ul>
-                                        </li>
-                                        <li><strong>改善度（5点）</strong>
-                                            <ul>
-                                                <li>前期比+10%以上：5点</li>
-                                                <li>前期比+5-9%：3点</li>
-                                                <li>前期比0-4%：1点</li>
-                                                <li>前期比マイナス：0点</li>
-                                            </ul>
-                                        </li>
-                                    </ul>
-                                </div>
-                                
-                                <div class="calculation-note">
-                                    <p><strong>⚠️ 手術時間の計算方法：</strong></p>
-                                    <ul>
-                                        <li>入室時刻から退室時刻までの経過時間</li>
-                                        <li>深夜跨ぎ対応（23:30入室→1:15退室 = 1時間45分）</li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="total-score-summary">
-                            <h4>📊 総合スコア = 全身麻酔(70点) + 全手術(15点) + 手術時間(15点)</h4>
-                            <p class="score-note">※ 最高100点満点で評価</p>
-                            
-                            <div class="grade-system">
-                                <h5>グレード判定：</h5>
-                                <ul class="grade-list">
-                                    <li><span class="grade-badge grade-s">S</span> 90点以上（卓越したパフォーマンス）</li>
-                                    <li><span class="grade-badge grade-a">A</span> 80-89点（優秀なパフォーマンス）</li>
-                                    <li><span class="grade-badge grade-b">B</span> 70-79点（良好なパフォーマンス）</li>
-                                    <li><span class="grade-badge grade-c">C</span> 60-69点（標準的なパフォーマンス）</li>
-                                    <li><span class="grade-badge grade-d">D</span> 60点未満（改善が必要）</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-            <!-- 既存の用語説明・計算方法・活用のヒントセクション -->
-            <!-- 省略（変更なし） -->
+            </div>
         </div>
-    </div>
-    """
+        """
 
     def _generate_tab_navigation_html(self) -> str:
         """タブナビゲーションHTML生成（統一デザイン版）"""
@@ -431,7 +284,6 @@ class SurgeryGitHubPublisher:
         recent_week_daily_avg = recent_week_kpi.get("平日1日あたり全身麻酔手術件数 (直近週)", "0.0")
     
         # 直近週の状態判定
-        # 評価クラスを決定
         if recent_week_gas >= 100:
             recent_week_class = "success"
         elif recent_week_gas >= 80:
@@ -606,8 +458,7 @@ class SurgeryGitHubPublisher:
             else:
                 weekly_trend_chart = self._generate_fallback_weekly_chart()
             
-            # ▼▼▼ 変更箇所 ▼▼▼
-            # 2つのチャートを grid-container で囲む
+            # 2つのチャートを並列表示
             return f"""
             <div id="surgery-summary" class="view-content active">
                 {summary_html}
@@ -617,7 +468,6 @@ class SurgeryGitHubPublisher:
                 </div>
             </div>
             """
-            # ▲▲▲ 変更箇所 ▲▲▲
             
         except Exception as e:
             logger.error(f"病院サマリタブ生成エラー: {e}")
@@ -637,7 +487,6 @@ class SurgeryGitHubPublisher:
                 rank_emoji = ["🥇", "🥈", "🥉"][i]
                 achievement_pct = dept.get('achievement_rate', 0)
                 
-                # 統一されたランキングカード
                 ranking_html += f"""
                 <div class="ranking-card rank-{i+1}">
                     <div class="rank-header">
@@ -652,71 +501,6 @@ class SurgeryGitHubPublisher:
                 </div>
                 """
             
-            # 1位の詳細スコア（統一デザイン）
-            score_breakdown = ""
-            if top3:
-                top_dept = top3[0]
-                target_perf = top_dept.get('target_performance', {})
-                improvement_score = top_dept.get('improvement_score', {})
-                
-                score_breakdown = f"""
-                <div class="summary">
-                    <h2>👑 診療科1位：{top_dept['display_name']}</h2>
-                    <div class="summary-stats">
-                        <div class="stat-item">
-                            <div class="stat-value">{top_dept['total_score']:.0f}点</div>
-                            <div class="stat-label">総合スコア</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value">{top_dept.get('achievement_rate', 0):.1f}%</div>
-                            <div class="stat-label">達成率</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value">{top_dept.get('hospital_rank', 0)}位</div>
-                            <div class="stat-label">病院内順位</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="grid-container">
-                    <div class="metric-card success">
-                        <div class="metric-title">📊 対目標パフォーマンス</div>
-                        <div class="metric-row">
-                            <span>スコア</span>
-                            <span class="metric-value-row">{target_perf.get('total', 0):.0f}点</span>
-                        </div>
-                        <div class="achievement-row">
-                            <span>達成率</span>
-                            <span>{top_dept.get('achievement_rate', 0):.1f}%</span>
-                        </div>
-                    </div>
-                    
-                    <div class="metric-card info">
-                        <div class="metric-title">📈 改善・継続性</div>
-                        <div class="metric-row">
-                            <span>スコア</span>
-                            <span class="metric-value-row">{improvement_score.get('total', 0):.0f}点</span>
-                        </div>
-                        <div class="achievement-row">
-                            <span>安定性</span>
-                            <span>{improvement_score.get('stability', 0):.0f}点</span>
-                        </div>
-                    </div>
-                    
-                    <div class="metric-card warning">
-                        <div class="metric-title">🎯 相対競争力</div>
-                        <div class="metric-row">
-                            <span>スコア</span>
-                            <span class="metric-value-row">{top_dept.get('competitive_score', 0):.0f}点</span>
-                        </div>
-                        <div class="achievement-row">
-                            <span>改善度</span>
-                            <span>{top_dept.get('improvement_rate', 0):+.1f}%</span>
-                        </div>
-                    </div>
-                </div>
-                """
-            
             return f"""
             <div id="high-score" class="view-content">
                 <div class="stats-highlight">
@@ -727,8 +511,6 @@ class SurgeryGitHubPublisher:
                 <div class="ranking-section">
                     {ranking_html}
                 </div>
-                
-                {score_breakdown}
             </div>
             """
             
@@ -768,12 +550,11 @@ class SurgeryGitHubPublisher:
             </div>
             """
             
-            # 診療科カード生成（統一デザイン）
+            # 診療科カード生成
             cards_html = ""
             for _, row in dept_performance.iterrows():
                 achievement_rate = row['達成率(%)']
                 
-                # 達成率に応じた統一クラス
                 if achievement_rate >= 100:
                     card_class = "success"
                 elif achievement_rate >= 90:
@@ -847,57 +628,16 @@ class SurgeryGitHubPublisher:
             </div>
             """
             
-            action_plan = f"""
-            <div class="analysis-card {action_class}">
-                <h3>🎯 目標達成施策</h3>
-                <ul>
-                    <li>手術室稼働率を{max(85, utilization + 5):.0f}%以上に向上させる</li>
-                    <li>診療科間の手術枠最適化を実施する</li>
-                    <li>緊急手術体制の強化を検討する</li>
-                    <li>年度末目標：{int(yearly_data.get('projected_annual', 0) * 1.03):,}件を目指す</li>
-                    <li>{'現在の成長ペースを維持する' if growth_rate > 5 else 'パフォーマンス向上策を強化する'}</li>
-                </ul>
-            </div>
-            """
-            
-            # KPI要約カード
-            kpi_summary = f"""
-            <div class="metric-card {'success' if growth_rate > 5 and utilization >= 85 else 'warning' if growth_rate >= 0 or utilization >= 80 else 'danger'}">
-                <div class="metric-title">📊 統合パフォーマンス指標</div>
-                <div class="metric-row">
-                    <span>年度成長率</span>
-                    <span class="metric-value-row">{growth_rate:+.1f}%</span>
-                </div>
-                <div class="metric-row">
-                    <span>手術室稼働率</span>
-                    <span class="metric-value-row">{utilization:.1f}%</span>
-                </div>
-                <div class="metric-row">
-                    <span>年度末予測</span>
-                    <span class="metric-value-row">{yearly_data.get('projected_annual', 0):,}件</span>
-                </div>
-                <div class="achievement-row">
-                    <span>総合評価</span>
-                    <span>{'優秀' if growth_rate > 5 and utilization >= 85 else '良好' if growth_rate >= 0 or utilization >= 80 else '要改善'}</span>
-                </div>
-            </div>
-            """
-            
             return f"""
             <div id="analysis" class="view-content">
                 <div class="summary">
                     <h2>📈 詳細分析・改善提案</h2>
                 </div>
                 
-                <div class="grid-container" style="grid-template-columns: 1fr;">
-                    {kpi_summary}
-                </div>
-                
                 <div class="analysis-section">
                     <h2>📊 年度目標達成分析</h2>
                     <div class="analysis-grid">
                         {improvement_analysis}
-                        {action_plan}
                     </div>
                 </div>
             </div>
@@ -907,292 +647,7 @@ class SurgeryGitHubPublisher:
             logger.error(f"詳細分析タブ生成エラー: {e}")
             return '<div id="analysis" class="view-content"><p>詳細分析データの読み込みでエラーが発生しました</p></div>'
 
-
-    def _get_monthly_trend_data(self, df: pd.DataFrame, yearly_data: Dict[str, Any]) -> list:
-        """実データに基づく月別トレンドデータ取得（遡って6ヶ月、前年同日比較）"""
-        try:
-            if df.empty:
-                return []
-
-            # 日付列をdatetime型に変換（エラーを無視）
-            df['手術実施日_dt'] = pd.to_datetime(df['手術実施日_dt'], errors='coerce')
-            df.dropna(subset=['手術実施日_dt'], inplace=True)
-            
-            latest_date = df['手術実施日_dt'].max()
-            
-            result = []
-            
-            # 常に遡って6ヶ月分のデータを表示
-            for i in range(6):
-                # 基準となる月を計算 (5ヶ月前から現在月まで)
-                target_month_date = latest_date - pd.DateOffset(months=i)
-                current_year = target_month_date.year
-                current_month = target_month_date.month
-
-                # is_gas_20min列がTrueのデータのみをフィルタリング
-                gas_df = df[df['is_gas_20min'] == True]
-
-                # 今年度データの取得
-                current_month_df = gas_df[
-                    (gas_df['手術実施日_dt'].dt.year == current_year) &
-                    (gas_df['手術実施日_dt'].dt.month == current_month)
-                ]
-
-                # 前年度データの取得
-                last_year_month_df = gas_df[
-                    (gas_df['手術実施日_dt'].dt.year == current_year - 1) &
-                    (gas_df['手術実施日_dt'].dt.month == current_month)
-                ]
-                
-                month_name = f"{current_year % 100}年{current_month}月"
-                is_partial = (current_year == latest_date.year and current_month == latest_date.month)
-                
-                current_count = len(current_month_df)
-                last_year_count = len(last_year_month_df)
-
-                # 月の途中までのデータについては、前年データも同日までの比較にする
-                if is_partial and latest_date.day < pd.Timestamp(latest_date).days_in_month:
-                    day_of_month = latest_date.day
-                    current_count = len(current_month_df[current_month_df['手術実施日_dt'].dt.day <= day_of_month])
-                    last_year_count = len(last_year_month_df[last_year_month_df['手術実施日_dt'].dt.day <= day_of_month])
-                    month_name += f" ({day_of_month}日時点)"
-
-                result.append({
-                    'month': f"{current_year}-{current_month:02d}",
-                    'month_name': month_name,
-                    'count': int(current_count),
-                    'last_year_count': int(last_year_count) if last_year_count > 0 else None,
-                    'is_partial': is_partial
-                })
-            
-            # 月の昇順に並び替え
-            result.reverse()
-            return result
-            
-        except Exception as e:
-            logger.error(f"月別トレンドデータ取得エラー: {e}")
-            return []
-
-    def _generate_monthly_trend_section(self, yearly_data: Dict[str, Any]) -> str:
-        """月別トレンドセクション生成（折れ線グラフ版、Y軸可変、過去6ヶ月表示）"""
-        try:
-            if not yearly_data:
-                return ""
-            
-            if hasattr(self, 'df'):
-                monthly_data = self._get_monthly_trend_data(self.df, yearly_data)
-            else:
-                logger.warning("dfが見つかりません。月別トレンドデータをスキップします。")
-                return self._generate_fallback_trend_chart(yearly_data)
-            
-            if not monthly_data:
-                return self._generate_fallback_trend_chart(yearly_data)
-            
-            import json
-            
-            labels = [item['month_name'] for item in monthly_data]
-            values = [int(item['count']) for item in monthly_data]
-            
-            target_value = int(yearly_data.get('monthly_target', 420))
-            target_line = [target_value] * len(labels)
-            
-            last_year_values = [int(item['last_year_count']) if item.get('last_year_count') is not None else 0 for item in monthly_data]
-            # Noneをグラフにプロットしないようにnullに変換
-            last_year_values_for_plot = [val if val > 0 else None for val in last_year_values]
-
-            # Y軸の最大値・最小値をデータに合わせて動的に設定
-            all_plot_values = [v for v in values if v is not None] + \
-                              [v for v in last_year_values if v is not None and v > 0]
-            if target_value:
-                 all_plot_values.append(target_value)
-            
-            if not all_plot_values:
-                min_value, max_value = 0, 500 # デフォルト値
-            else:
-                data_min = min(all_plot_values)
-                data_max = max(all_plot_values)
-                padding = (data_max - data_min) * 0.15 if (data_max - data_min) > 0 else 20
-                min_value = int(max(0, data_min - padding))
-                max_value = int(data_max + padding)
-
-            html_content = f'''
-            <div class="trend-chart">
-                <h3>📈 月別推移（全身麻酔手術件数 - 過去6ヶ月）</h3>
-                <div style="position: relative; height: 300px; margin: 20px 0;">
-                    <canvas id="monthlyTrendChart"></canvas>
-                </div>
-                <p style="text-align: center; color: #666; font-size: 12px;">
-                    実線：当月実績 | 点線：前年同月実績 | 破線：目標ライン（月{target_value}件）
-                </p>
-            </div>
-            
-            <script>
-            (function() {{
-                function initChart() {{
-                    const ctx = document.getElementById('monthlyTrendChart');
-                    if (!ctx) {{
-                        setTimeout(initChart, 100);
-                        return;
-                    }}
-                    
-                    const chartData = {{
-                        labels: {json.dumps(labels, ensure_ascii=False)},
-                        datasets: [
-                            {{
-                                label: '当月実績',
-                                data: {json.dumps(values)},
-                                borderColor: 'rgb(102, 126, 234)',
-                                backgroundColor: 'rgba(102, 126, 234, 0.1)',
-                                borderWidth: 3,
-                                tension: 0.1,
-                                pointRadius: 5,
-                            }},
-                            {{
-                                label: '前年同月実績',
-                                data: {json.dumps(last_year_values_for_plot)},
-                                borderColor: 'rgb(156, 163, 175)',
-                                backgroundColor: 'rgba(156, 163, 175, 0.1)',
-                                borderWidth: 2,
-                                borderDash: [5, 5],
-                                tension: 0.1,
-                                pointRadius: 4,
-                                spanGaps: true, // null値を線で繋がない
-                            }},
-                            {{
-                                label: '目標ライン',
-                                data: {json.dumps(target_line)},
-                                borderColor: 'rgb(255, 152, 0)',
-                                borderWidth: 2,
-                                borderDash: [10, 5],
-                                pointRadius: 0,
-                                fill: false
-                            }}
-                        ]
-                    }};
-                    
-                    const chartOptions = {{
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {{
-                            legend: {{
-                                display: true,
-                                position: 'top',
-                            }},
-                            tooltip: {{
-                                mode: 'index',
-                                intersect: false,
-                                callbacks: {{
-                                    label: function(context) {{
-                                        let label = context.dataset.label || '';
-                                        if (label) {{
-                                            label += ': ';
-                                        }}
-                                        if (context.parsed.y !== null) {{
-                                            label += context.parsed.y + '件';
-                                        }}
-                                        return label;
-                                    }}
-                                }}
-                            }}
-                        }},
-                        scales: {{
-                            y: {{
-                                display: true,
-                                suggestedMin: {min_value},
-                                suggestedMax: {max_value},
-                                grid: {{
-                                    color: 'rgba(0, 0, 0, 0.05)'
-                                }},
-                                ticks: {{
-                                    callback: function(value) {{
-                                        return Math.round(value) + '件';
-                                    }}
-                                }}
-                            }}
-                        }},
-                        interaction: {{
-                            mode: 'nearest',
-                            axis: 'x',
-                            intersect: false
-                        }}
-                    }};
-                    
-                    new Chart(ctx, {{
-                        type: 'line',
-                        data: chartData,
-                        options: chartOptions
-                    }});
-                }}
-                
-                if (document.readyState === 'loading') {{
-                    document.addEventListener('DOMContentLoaded', initChart);
-                }} else {{
-                    setTimeout(initChart, 100);
-                }}
-            }})();
-            </script>
-            '''
-            
-            return html_content
-            
-        except Exception as e:
-            logger.error(f"月別トレンドセクション生成エラー: {e}")
-            return self._generate_fallback_trend_chart(yearly_data)
-            
-
-    def _generate_fallback_trend_chart(self, yearly_data: Dict[str, Any]) -> str:
-        """フォールバック用の棒グラフ表示"""
-        try:
-            # yearly_dataから直接月別データを取得できる場合
-            monthly_trend = yearly_data.get('monthly_trend', [])
-            
-            if not monthly_trend:
-                return """
-                <div class="trend-chart">
-                    <h3>📈 月別推移（全身麻酔手術件数）</h3>
-                    <p style="text-align: center; padding: 40px; color: #666;">
-                        月別トレンドデータを準備中...
-                    </p>
-                </div>
-                """
-            
-            # 最大値を取得してバーの高さを正規化
-            max_count = max(int(item.get('count', 0)) for item in monthly_trend)
-            if max_count == 0:
-                max_count = 100
-            
-            bars_html = ""
-            for item in monthly_trend[-4:]:  # 直近4ヶ月分を表示
-                count = int(item.get('count', 0))
-                height_percent = (count / max_count * 100) if max_count > 0 else 0
-                month_name = item.get('month_name', item.get('month', ''))
-                
-                bars_html += f'''
-                <div class="trend-bar" style="height: {height_percent}%;">
-                    <div class="trend-bar-value">{count}</div>
-                    <div class="trend-bar-label">{month_name}</div>
-                </div>
-                '''
-            
-            return f'''
-            <div class="trend-chart">
-                <h3>📈 月別推移（全身麻酔手術件数）</h3>
-                <div class="trend-bars">
-                    {bars_html}
-                </div>
-                <p style="text-align: center; color: #666; font-size: 12px;">
-                    青：今年度実績 | 目標ペース：月平均{yearly_data.get('monthly_target', 420)}件
-                </p>
-            </div>
-            '''
-            
-        except Exception as e:
-            logger.error(f"フォールバックチャート生成エラー: {e}")
-            return ""
-
-
-    # reporting/surgery_github_publisher.py に追加する関数
-    
+    # 週別推移チャート関連の関数を追加
     def _get_weekly_trend_data(self, df: pd.DataFrame, latest_date: pd.Timestamp) -> list:
         """週別トレンドデータを取得"""
         try:
@@ -1201,7 +656,6 @@ class SurgeryGitHubPublisher:
         except Exception as e:
             logger.error(f"週別トレンドデータ取得エラー: {e}")
             return []
-    
     
     def _generate_weekly_trend_section(self, weekly_data: list) -> str:
         """週別トレンドセクション生成（折れ線グラフ版、過去8週間表示）"""
@@ -1223,11 +677,11 @@ class SurgeryGitHubPublisher:
                 float(item['prev_year_month_avg']) if item.get('prev_year_month_avg') is not None else None 
                 for item in weekly_data
             ]
-    
+
             # Y軸の最大値・最小値をデータに合わせて動的に設定
             all_plot_values = [v for v in values if v is not None] + \
-                            [v for v in prev_year_values if v is not None] + \
-                            [target_value]
+                              [v for v in prev_year_values if v is not None] + \
+                              [target_value]
             
             if not all_plot_values:
                 min_value, max_value = 0, 120
@@ -1237,7 +691,7 @@ class SurgeryGitHubPublisher:
                 padding = (data_max - data_min) * 0.15 if (data_max - data_min) > 0 else 10
                 min_value = int(max(0, data_min - padding))
                 max_value = int(data_max + padding)
-    
+
             html_content = f'''
             <div class="trend-chart">
                 <h3>📊 週別推移（全身麻酔手術件数 - 過去8週間）</h3>
@@ -1364,7 +818,6 @@ class SurgeryGitHubPublisher:
             logger.error(f"週別トレンドセクション生成エラー: {e}")
             return self._generate_fallback_weekly_chart()
     
-    
     def _generate_fallback_weekly_chart(self) -> str:
         """フォールバック用の週別チャート表示"""
         return """
@@ -1372,10 +825,251 @@ class SurgeryGitHubPublisher:
             <h3>📊 週別推移（全身麻酔手術件数 - 過去8週間）</h3>
             <p style="text-align: center; padding: 40px; color: #666;">
                 週別トレンドデータを準備中...
-        </p>
-    </div>
-    """
+            </p>
+        </div>
+        """
 
+    # 月別推移チャート関連の関数（既存）
+    def _get_monthly_trend_data(self, df: pd.DataFrame, yearly_data: Dict[str, Any]) -> list:
+        """実データに基づく月別トレンドデータ取得（遡って6ヶ月、前年同日比較）"""
+        try:
+            if df.empty:
+                return []
+
+            # 日付列をdatetime型に変換
+            df['手術実施日_dt'] = pd.to_datetime(df['手術実施日_dt'], errors='coerce')
+            df.dropna(subset=['手術実施日_dt'], inplace=True)
+            
+            latest_date = df['手術実施日_dt'].max()
+            
+            result = []
+            
+            # 常に遡って6ヶ月分のデータを表示
+            for i in range(6):
+                target_month_date = latest_date - pd.DateOffset(months=i)
+                current_year = target_month_date.year
+                current_month = target_month_date.month
+
+                # 全身麻酔手術のみをフィルタリング
+                gas_df = df[df['is_gas_20min'] == True]
+
+                # 今年度データの取得
+                current_month_df = gas_df[
+                    (gas_df['手術実施日_dt'].dt.year == current_year) &
+                    (gas_df['手術実施日_dt'].dt.month == current_month)
+                ]
+
+                # 前年度データの取得
+                last_year_month_df = gas_df[
+                    (gas_df['手術実施日_dt'].dt.year == current_year - 1) &
+                    (gas_df['手術実施日_dt'].dt.month == current_month)
+                ]
+                
+                month_name = f"{current_year % 100}年{current_month}月"
+                is_partial = (current_year == latest_date.year and current_month == latest_date.month)
+                
+                current_count = len(current_month_df)
+                last_year_count = len(last_year_month_df)
+
+                # 月の途中までのデータについては、前年データも同日までの比較にする
+                if is_partial and latest_date.day < pd.Timestamp(latest_date).days_in_month:
+                    day_of_month = latest_date.day
+                    current_count = len(current_month_df[current_month_df['手術実施日_dt'].dt.day <= day_of_month])
+                    last_year_count = len(last_year_month_df[last_year_month_df['手術実施日_dt'].dt.day <= day_of_month])
+                    month_name += f" ({day_of_month}日時点)"
+
+                result.append({
+                    'month': f"{current_year}-{current_month:02d}",
+                    'month_name': month_name,
+                    'count': int(current_count),
+                    'last_year_count': int(last_year_count) if last_year_count > 0 else None,
+                    'is_partial': is_partial
+                })
+            
+            # 月の昇順に並び替え
+            result.reverse()
+            return result
+            
+        except Exception as e:
+            logger.error(f"月別トレンドデータ取得エラー: {e}")
+            return []
+
+    def _generate_monthly_trend_section(self, yearly_data: Dict[str, Any]) -> str:
+        """月別トレンドセクション生成（折れ線グラフ版、Y軸可変、過去6ヶ月表示）"""
+        try:
+            if not yearly_data:
+                return ""
+            
+            if hasattr(self, 'df'):
+                monthly_data = self._get_monthly_trend_data(self.df, yearly_data)
+            else:
+                logger.warning("dfが見つかりません。月別トレンドデータをスキップします。")
+                return self._generate_fallback_trend_chart(yearly_data)
+            
+            if not monthly_data:
+                return self._generate_fallback_trend_chart(yearly_data)
+            
+            import json
+            
+            labels = [item['month_name'] for item in monthly_data]
+            values = [int(item['count']) for item in monthly_data]
+            
+            target_value = int(yearly_data.get('monthly_target', 420))
+            target_line = [target_value] * len(labels)
+            
+            last_year_values = [int(item['last_year_count']) if item.get('last_year_count') is not None else 0 for item in monthly_data]
+            # Noneをグラフにプロットしないようにnullに変換
+            last_year_values_for_plot = [val if val > 0 else None for val in last_year_values]
+
+            # Y軸の最大値・最小値をデータに合わせて動的に設定
+            all_plot_values = [v for v in values if v is not None] + \
+                              [v for v in last_year_values if v is not None and v > 0]
+            if target_value:
+                 all_plot_values.append(target_value)
+            
+            if not all_plot_values:
+                min_value, max_value = 0, 500 # デフォルト値
+            else:
+                data_min = min(all_plot_values)
+                data_max = max(all_plot_values)
+                padding = (data_max - data_min) * 0.15 if (data_max - data_min) > 0 else 20
+                min_value = int(max(0, data_min - padding))
+                max_value = int(data_max + padding)
+
+            html_content = f'''
+            <div class="trend-chart">
+                <h3>📈 月別推移（全身麻酔手術件数 - 過去6ヶ月）</h3>
+                <div style="position: relative; height: 300px; margin: 20px 0;">
+                    <canvas id="monthlyTrendChart"></canvas>
+                </div>
+                <p style="text-align: center; color: #666; font-size: 12px;">
+                    実線：当月実績 | 点線：前年同月実績 | 破線：目標ライン（月{target_value}件）
+                </p>
+            </div>
+            
+            <script>
+            (function() {{
+                function initChart() {{
+                    const ctx = document.getElementById('monthlyTrendChart');
+                    if (!ctx) {{
+                        setTimeout(initChart, 100);
+                        return;
+                    }}
+                    
+                    const chartData = {{
+                        labels: {json.dumps(labels, ensure_ascii=False)},
+                        datasets: [
+                            {{
+                                label: '当月実績',
+                                data: {json.dumps(values)},
+                                borderColor: 'rgb(102, 126, 234)',
+                                backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                borderWidth: 3,
+                                tension: 0.1,
+                                pointRadius: 5,
+                            }},
+                            {{
+                                label: '前年同月実績',
+                                data: {json.dumps(last_year_values_for_plot)},
+                                borderColor: 'rgb(156, 163, 175)',
+                                backgroundColor: 'rgba(156, 163, 175, 0.1)',
+                                borderWidth: 2,
+                                borderDash: [5, 5],
+                                tension: 0.1,
+                                pointRadius: 4,
+                                spanGaps: true,
+                            }},
+                            {{
+                                label: '目標ライン',
+                                data: {json.dumps(target_line)},
+                                borderColor: 'rgb(255, 152, 0)',
+                                borderWidth: 2,
+                                borderDash: [10, 5],
+                                pointRadius: 0,
+                                fill: false
+                            }}
+                        ]
+                    }};
+                    
+                    const chartOptions = {{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {{
+                            legend: {{
+                                display: true,
+                                position: 'top',
+                            }},
+                            tooltip: {{
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {{
+                                    label: function(context) {{
+                                        let label = context.dataset.label || '';
+                                        if (label) {{
+                                            label += ': ';
+                                        }}
+                                        if (context.parsed.y !== null) {{
+                                            label += context.parsed.y + '件';
+                                        }}
+                                        return label;
+                                    }}
+                                }}
+                            }}
+                        }},
+                        scales: {{
+                            y: {{
+                                display: true,
+                                suggestedMin: {min_value},
+                                suggestedMax: {max_value},
+                                grid: {{
+                                    color: 'rgba(0, 0, 0, 0.05)'
+                                }},
+                                ticks: {{
+                                    callback: function(value) {{
+                                        return Math.round(value) + '件';
+                                    }}
+                                }}
+                            }}
+                        }},
+                        interaction: {{
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }}
+                    }};
+                    
+                    new Chart(ctx, {{
+                        type: 'line',
+                        data: chartData,
+                        options: chartOptions
+                    }});
+                }}
+                
+                if (document.readyState === 'loading') {{
+                    document.addEventListener('DOMContentLoaded', initChart);
+                }} else {{
+                    setTimeout(initChart, 100);
+                }}
+            }})();
+            </script>
+            '''
+            
+            return html_content
+            
+        except Exception as e:
+            logger.error(f"月別トレンドセクション生成エラー: {e}")
+            return self._generate_fallback_trend_chart(yearly_data)
+
+    def _generate_fallback_trend_chart(self, yearly_data: Dict[str, Any]) -> str:
+        """フォールバック用の棒グラフ表示"""
+        return """
+        <div class="trend-chart">
+            <h3>📈 月別推移（全身麻酔手術件数）</h3>
+            <p style="text-align: center; padding: 40px; color: #666;">
+                月別トレンドデータを準備中...
+            </p>
+        </div>
+        """
 
     def _generate_javascript_functions(self) -> str:
         """JavaScript関数生成（情報パネル機能追加版）"""
@@ -1463,8 +1157,7 @@ class SurgeryGitHubPublisher:
     
     def _get_integrated_dashboard_css(self) -> str:
         """手術分析ダッシュボード用CSS（情報パネル追加版）"""
-        # 既存のCSSはそのまま残す
-        base_css = """
+        return """
             :root {
                 /* === 統一カラーパレット === */
                 --primary-color: #667eea;
@@ -1527,6 +1220,125 @@ class SurgeryGitHubPublisher:
                 max-width: 1200px;
                 margin: 0 auto;
                 padding: 0 20px;
+            }
+            
+            /* === 情報ボタン === */
+            .info-button {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                background: var(--primary-color);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: var(--transition);
+                box-shadow: var(--shadow-sm);
+            }
+            
+            .info-button:hover {
+                background: var(--primary-dark);
+                transform: translateY(-2px);
+                box-shadow: var(--shadow-md);
+            }
+            
+            /* === 情報パネルオーバーレイ === */
+            .info-overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 999;
+                animation: fadeIn 0.3s ease;
+            }
+            
+            /* === 情報パネル === */
+            .info-panel {
+                display: none;
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 90%;
+                max-width: 800px;
+                max-height: 80vh;
+                background: white;
+                border-radius: 16px;
+                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+                z-index: 1000;
+                overflow: hidden;
+                animation: slideIn 0.3s ease;
+            }
+            
+            @keyframes slideIn {
+                from {
+                    transform: translate(-50%, -45%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translate(-50%, -50%);
+                    opacity: 1;
+                }
+            }
+            
+            .info-panel-header {
+                background: var(--primary-color);
+                color: white;
+                padding: 20px 24px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            
+            .info-panel-header h2 {
+                margin: 0;
+                font-size: 1.4em;
+                font-weight: 700;
+            }
+            
+            .close-button {
+                background: none;
+                border: none;
+                color: white;
+                font-size: 24px;
+                cursor: pointer;
+                padding: 0;
+                width: 32px;
+                height: 32px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 4px;
+                transition: background 0.2s;
+            }
+            
+            .close-button:hover {
+                background: rgba(255, 255, 255, 0.2);
+            }
+            
+            .info-panel-content {
+                padding: 24px;
+                overflow-y: auto;
+                max-height: calc(80vh - 80px);
+            }
+            
+            .info-section {
+                margin-bottom: 32px;
+            }
+            
+            .info-section h3 {
+                color: var(--text-primary);
+                margin-bottom: 16px;
+                font-size: 1.2em;
+                font-weight: 600;
+                border-bottom: 2px solid #E5E7EB;
+                padding-bottom: 8px;
             }
             
             /* === タブナビゲーション === */
@@ -1759,109 +1571,6 @@ class SurgeryGitHubPublisher:
                 font-weight: 500;
             }
             
-            /* === 年度比較カード === */
-            .yearly-comparison-card {
-                background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-                color: white;
-                border-radius: 16px;
-                padding: 32px;
-                margin-bottom: 32px;
-                box-shadow: var(--shadow-lg);
-                position: relative;
-                overflow: hidden;
-            }
-            
-            .yearly-comparison-card::before {
-                content: '';
-                position: absolute;
-                top: -50%;
-                right: -20%;
-                width: 100%;
-                height: 200%;
-                background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-                pointer-events: none;
-            }
-            
-            .yearly-card-header {
-                display: flex;
-                align-items: center;
-                margin-bottom: 24px;
-                position: relative;
-                z-index: 1;
-            }
-            
-            .yearly-card-icon {
-                font-size: 32px;
-                margin-right: 16px;
-            }
-            
-            .yearly-card-title {
-                font-size: 20px;
-                font-weight: 700;
-            }
-            
-            .yearly-card-subtitle {
-                font-size: 14px;
-                opacity: 0.9;
-                margin-top: 4px;
-            }
-            
-            .yearly-comparison-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 20px;
-                margin-bottom: 24px;
-                position: relative;
-                z-index: 1;
-            }
-            
-            .yearly-metric {
-                text-align: center;
-                padding: 20px;
-                background: rgba(255, 255, 255, 0.15);
-                border-radius: var(--border-radius);
-                backdrop-filter: blur(10px);
-            }
-            
-            .yearly-metric-label {
-                font-size: 12px;
-                opacity: 0.9;
-                margin-bottom: 8px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-            }
-            
-            .yearly-metric-value {
-                font-size: 28px;
-                font-weight: 700;
-                margin-bottom: 4px;
-            }
-            
-            .yearly-metric-period {
-                font-size: 11px;
-                opacity: 0.8;
-            }
-            
-            .yearly-comparison-result {
-                background: rgba(255, 255, 255, 0.2);
-                border-radius: var(--border-radius);
-                padding: 20px;
-                text-align: center;
-                position: relative;
-                z-index: 1;
-            }
-            
-            .yearly-change-value {
-                font-size: 36px;
-                font-weight: 700;
-                margin-bottom: 8px;
-            }
-            
-            .yearly-change-label {
-                font-size: 14px;
-                opacity: 0.9;
-            }
-            
             /* === ハイスコアランキング === */
             .stats-highlight {
                 background: #F9FAFB;
@@ -1957,7 +1666,7 @@ class SurgeryGitHubPublisher:
                 text-align: right;
             }
             
-            /* === 月別トレンドチャート === */
+            /* === トレンドチャート === */
             .trend-chart {
                 background: white;
                 border-radius: var(--border-radius);
@@ -1974,7 +1683,7 @@ class SurgeryGitHubPublisher:
                 font-weight: 600;
             }
             
-            #monthlyTrendChart {
+            #monthlyTrendChart, #weeklyTrendChart {
                 max-width: 100%;
                 height: 100%;
             }
@@ -2004,17 +1713,22 @@ class SurgeryGitHubPublisher:
                 border: 1px solid #F3F4F6;
             }
             
-            .analysis-card.improvement {
+            .analysis-card.success {
                 border-left-color: var(--success-color);
                 background: rgba(16, 185, 129, 0.05);
             }
             
-            .analysis-card.concern {
+            .analysis-card.warning {
                 border-left-color: var(--warning-color);
                 background: rgba(245, 158, 11, 0.05);
             }
             
-            .analysis-card.action {
+            .analysis-card.danger {
+                border-left-color: var(--danger-color);
+                background: rgba(239, 68, 68, 0.05);
+            }
+            
+            .analysis-card.info {
                 border-left-color: var(--info-color);
                 background: rgba(59, 130, 246, 0.05);
             }
@@ -2083,15 +1797,6 @@ class SurgeryGitHubPublisher:
                     min-height: 120px;
                 }
                 
-                .yearly-comparison-card {
-                    padding: 24px;
-                }
-                
-                .yearly-comparison-grid {
-                    grid-template-columns: 1fr;
-                    gap: 16px;
-                }
-                
                 .summary-stats {
                     grid-template-columns: 1fr;
                     gap: 12px;
@@ -2108,491 +1813,7 @@ class SurgeryGitHubPublisher:
                 .ranking-card {
                     padding: 20px;
                 }
-            }
-            
-            @media (max-width: 480px) {
-                .header h1 {
-                    font-size: 1.5em;
-                }
                 
-                .metric-card {
-                    padding: 14px;
-                }
-                
-                .yearly-comparison-card {
-                    padding: 20px;
-                }
-                
-                .yearly-metric {
-                    padding: 16px;
-                }
-                
-                .yearly-metric-value {
-                    font-size: 24px;
-                }
-                
-                .score-value {
-                    font-size: 1.8em;
-                }
-                
-                .dept-name {
-                    font-size: 1.2em;
-                }
-            }
-            """
-        
-        # 情報パネル用の追加CSS
-        info_panel_css = """
-            /* === 情報ボタン === */
-            .info-button {
-                position: absolute;
-                top: 20px;
-                right: 20px;
-                background: var(--primary-color);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-size: 14px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: var(--transition);
-                box-shadow: var(--shadow-sm);
-            }
-            
-            .info-button:hover {
-                background: var(--primary-dark);
-                transform: translateY(-2px);
-                box-shadow: var(--shadow-md);
-            }
-            
-            /* === 情報パネルオーバーレイ === */
-            .info-overlay {
-                display: none;
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0, 0, 0, 0.5);
-                z-index: 999;
-                animation: fadeIn 0.3s ease;
-            }
-            
-            /* === 情報パネル === */
-            .info-panel {
-                display: none;
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 90%;
-                max-width: 800px;
-                max-height: 80vh;
-                background: white;
-                border-radius: 16px;
-                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
-                z-index: 1000;
-                overflow: hidden;
-                animation: slideIn 0.3s ease;
-            }
-            
-            @keyframes slideIn {
-                from {
-                    transform: translate(-50%, -45%);
-                    opacity: 0;
-                }
-                to {
-                    transform: translate(-50%, -50%);
-                    opacity: 1;
-                }
-            }
-            
-            .info-panel-header {
-                background: var(--primary-color);
-                color: white;
-                padding: 20px 24px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
-            
-            .info-panel-header h2 {
-                margin: 0;
-                font-size: 1.4em;
-                font-weight: 700;
-            }
-            
-            .close-button {
-                background: none;
-                border: none;
-                color: white;
-                font-size: 24px;
-                cursor: pointer;
-                padding: 0;
-                width: 32px;
-                height: 32px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                border-radius: 4px;
-                transition: background 0.2s;
-            }
-            
-            .close-button:hover {
-                background: rgba(255, 255, 255, 0.2);
-            }
-            
-            .info-panel-content {
-                padding: 24px;
-                overflow-y: auto;
-                max-height: calc(80vh - 80px);
-            }
-            
-            .info-section {
-                margin-bottom: 32px;
-            }
-            
-            .info-section h3 {
-                color: var(--text-primary);
-                margin-bottom: 16px;
-                font-size: 1.2em;
-                font-weight: 600;
-                border-bottom: 2px solid #E5E7EB;
-                padding-bottom: 8px;
-            }
-            
-            /* === 評価基準グリッド === */
-            .criteria-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                gap: 16px;
-            }
-            
-            .criteria-card {
-                background: #F9FAFB;
-                border-radius: 8px;
-                padding: 16px;
-                border: 1px solid #E5E7EB;
-            }
-            
-            .criteria-card h4 {
-                margin: 0 0 12px 0;
-                color: var(--text-primary);
-                font-size: 1em;
-                font-weight: 600;
-            }
-            
-            .criteria-card ul {
-                margin: 0;
-                padding-left: 0;
-                list-style: none;
-            }
-            
-            .criteria-card li {
-                margin-bottom: 8px;
-                font-size: 14px;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }
-            
-            /* === バッジ === */
-            .badge {
-                display: inline-block;
-                padding: 2px 8px;
-                border-radius: 4px;
-                font-size: 12px;
-                font-weight: 600;
-                color: white;
-                min-width: 60px;
-                text-align: center;
-            }
-            
-            .badge.success { background: var(--success-color); }
-            .badge.info { background: var(--info-color); }
-            .badge.warning { background: var(--warning-color); }
-            .badge.danger { background: var(--danger-color); }
-            
-            /* === スコア計算説明セクション === */
-            .score-calculation-section {
-                background: #FEF3C7;
-                border-radius: 12px;
-                padding: 24px;
-                border: 1px solid #FCD34D;
-                margin-bottom: 32px;
-            }
-            
-            .score-explanation {
-                margin-top: 16px;
-            }
-            
-            .score-intro {
-                font-size: 15px;
-                color: var(--text-primary);
-                margin-bottom: 24px;
-                font-weight: 500;
-            }
-            
-            .score-component {
-                background: white;
-                border-radius: 8px;
-                padding: 20px;
-                margin-bottom: 16px;
-                border: 1px solid #E5E7EB;
-                box-shadow: var(--shadow-sm);
-            }
-            
-            .score-component h4 {
-                margin: 0 0 16px 0;
-                color: var(--primary-color);
-                font-size: 1.1em;
-                font-weight: 600;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }
-            
-            .score-detail {
-                margin-left: 16px;
-            }
-            
-            .score-detail p {
-                margin: 8px 0;
-                font-size: 14px;
-                color: var(--text-secondary);
-            }
-            
-            .score-detail code {
-                display: inline-block;
-                background: #F3F4F6;
-                padding: 4px 12px;
-                border-radius: 4px;
-                font-family: 'Courier New', monospace;
-                font-size: 13px;
-                color: #374151;
-                border: 1px solid #E5E7EB;
-                margin: 8px 0;
-            }
-            
-            .score-breakdown {
-                margin-top: 16px;
-                background: #F9FAFB;
-                border-radius: 6px;
-                padding: 16px;
-            }
-            
-            .score-breakdown h5 {
-                margin: 0 0 12px 0;
-                font-size: 14px;
-                font-weight: 600;
-                color: var(--text-primary);
-            }
-            
-            .score-breakdown ul {
-                margin: 0;
-                padding-left: 20px;
-            }
-            
-            .score-breakdown > ul > li {
-                margin-bottom: 12px;
-                font-size: 14px;
-                color: var(--text-primary);
-            }
-            
-            .score-breakdown ul ul {
-                margin-top: 4px;
-                margin-bottom: 0;
-            }
-            
-            .score-breakdown ul ul li {
-                margin-bottom: 4px;
-                font-size: 13px;
-                color: var(--text-secondary);
-            }
-            
-            .total-score-summary {
-                background: var(--primary-color);
-                color: white;
-                border-radius: 8px;
-                padding: 20px;
-                text-align: center;
-                margin-top: 24px;
-            }
-            
-            .total-score-summary h4 {
-                margin: 0 0 8px 0;
-                color: white;
-                font-size: 1.1em;
-                font-weight: 700;
-            }
-            
-            .score-note {
-                margin: 0;
-                font-size: 14px;
-                opacity: 0.9;
-            }
-            
-            /* === グレードシステム === */
-            .grade-system {
-                background: #F9FAFB;
-                border-radius: 8px;
-                padding: 16px;
-                margin-top: 16px;
-            }
-            
-            .grade-system h5 {
-                margin: 0 0 12px 0;
-                font-size: 14px;
-                font-weight: 600;
-                color: var(--text-primary);
-            }
-            
-            .grade-list {
-                margin: 0;
-                padding: 0;
-                list-style: none;
-            }
-            
-            .grade-list li {
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                margin-bottom: 8px;
-                font-size: 14px
-            }
-        
-            .grade-badge {
-                display: inline-block;
-                width: 24px;
-                height: 24px;
-                border-radius: 50%;
-                text-align: center;
-                line-height: 24px;
-                font-weight: 700;
-                font-size: 14px;
-                color: white;
-            }
-            
-            .grade-badge.grade-s {
-                background: linear-gradient(135deg, #FFD700, #FFA500);
-                box-shadow: 0 2px 4px rgba(255, 215, 0, 0.4);
-            }
-            
-            .grade-badge.grade-a {
-                background: #DC143C;
-            }
-            
-            .grade-badge.grade-b {
-                background: #4169E1;
-            }
-            
-            .grade-badge.grade-c {
-                background: #32CD32;
-            }
-            
-            .grade-badge.grade-d {
-                background: #708090;
-            }
-            
-            .calculation-note {
-                background: #FEF3C7;
-                border-radius: 6px;
-                padding: 12px;
-                margin-top: 12px;
-                border: 1px solid #FCD34D;
-            }
-            
-            .calculation-note p {
-                margin: 0 0 8px 0;
-                font-weight: 600;
-                color: #92400E;
-            }
-            
-            .calculation-note ul {
-                margin: 0;
-                padding-left: 20px;
-            }
-            
-            .calculation-note li {
-                font-size: 13px;
-                color: #78350F;
-            }
-            
-            /* === 用語リスト === */
-            .term-list {
-                background: #F9FAFB;
-                border-radius: 8px;
-                padding: 20px;
-                margin: 0;
-            }
-            
-            .term-list dt {
-                font-weight: 600;
-                color: var(--text-primary);
-                margin-bottom: 4px;
-                font-size: 15px;
-            }
-            
-            .term-list dd {
-                color: var(--text-secondary);
-                margin: 0 0 16px 0;
-                padding-left: 16px;
-                font-size: 14px;
-                line-height: 1.6;
-            }
-            
-            /* === 計算式リスト === */
-            .formula-list {
-                display: flex;
-                flex-direction: column;
-                gap: 12px;
-            }
-            
-            .formula-item {
-                background: #F9FAFB;
-                border-radius: 8px;
-                padding: 12px 16px;
-                border: 1px solid #E5E7EB;
-            }
-            
-            .formula-item strong {
-                display: block;
-                color: var(--text-primary);
-                margin-bottom: 4px;
-                font-size: 14px;
-            }
-            
-            .formula-item code {
-                display: block;
-                background: white;
-                padding: 8px 12px;
-                border-radius: 4px;
-                font-family: 'Courier New', monospace;
-                font-size: 13px;
-                color: #374151;
-                border: 1px solid #E5E7EB;
-            }
-            
-            /* === ヒントリスト === */
-            .tips-list {
-                background: #F0F9FF;
-                border-radius: 8px;
-                padding: 20px;
-                margin: 0;
-                border: 1px solid #BFDBFE;
-            }
-            
-            .tips-list li {
-                color: #1E40AF;
-                margin-bottom: 12px;
-                padding-left: 8px;
-                font-size: 14px;
-                line-height: 1.6;
-            }
-            
-            /* === レスポンシブ対応（情報パネル） === */
-            @media (max-width: 768px) {
                 .info-button {
                     top: 60px;
                     right: 16px;
@@ -2609,30 +1830,26 @@ class SurgeryGitHubPublisher:
                     padding: 16px;
                     max-height: calc(90vh - 70px);
                 }
-                
-                .criteria-grid {
-                    grid-template-columns: 1fr;
+            }
+            
+            @media (max-width: 480px) {
+                .header h1 {
+                    font-size: 1.5em;
                 }
                 
-                .formula-item code {
-                    font-size: 11px;
-                    padding: 6px 8px;
-                    word-break: break-all;
+                .metric-card {
+                    padding: 14px;
                 }
                 
-                .score-component {
-                    padding: 16px;
+                .score-value {
+                    font-size: 1.8em;
                 }
                 
-                .score-breakdown {
-                    padding: 12px;
+                .dept-name {
+                    font-size: 1.2em;
                 }
             }
             """
-        
-        # 既存のCSSと情報パネル用CSSを結合して返す
-        return base_css + info_panel_css
-
 
     # === 既存関数（変更なし） ===
     
@@ -2706,14 +1923,11 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # このリポジトリのルートディレクトリをアップロード対象にする
           path: '.'
-
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
 """
-
 
         workflow_path = ".github/workflows/pages.yml"
         self._upload_file(workflow_path, workflow_content, skip_ci=skip_ci)
@@ -2722,6 +1936,7 @@ jobs:
     def get_public_url(self) -> str:
         """公開URLを取得"""
         return f"https://{self.repo_owner}.github.io/{self.repo_name}/"
+
 
 def create_surgery_github_publisher_interface():
     """手術分析GitHub公開インターフェース（4タブ手術分析ダッシュボード版）"""
@@ -2803,7 +2018,7 @@ def create_surgery_github_publisher_interface():
             elif not repo_owner or not repo_name:
                 st.sidebar.error("リポジトリ情報を入力してください")
             else:
-                with st.spinner("手術手術ダッシュボードを公開中..."):
+                with st.spinner("手術分析ダッシュボードを公開中..."):
                     publisher = SurgeryGitHubPublisher(
                         github_token, repo_owner, repo_name, branch
                     )
@@ -2854,8 +2069,6 @@ def create_surgery_github_publisher_interface():
         logger.error(f"手術GitHub公開インターフェースエラー: {e}")
         st.sidebar.error("GitHub公開機能でエラーが発生しました")
 
-
-# === 既存関数（変更なし） ===
 
 def test_github_connection(github_token: str, repo_owner: str, repo_name: str) -> Tuple[bool, str]:
     """GitHub接続テスト"""

@@ -66,8 +66,6 @@ def get_summary(df, department=None, use_complete_weeks=True):
 
     return summary.rename(columns={'week_start': '週'})[['週', '週合計件数', '平日件数', '実データ平日数', '平日1日平均件数']]
 
-# analysis/weekly.py に追加する関数
-
 def get_weekly_trend_data(df: pd.DataFrame, latest_date: pd.Timestamp, weeks: int = 8) -> list:
     """
     過去N週間の週別推移データを取得（全身麻酔手術件数）
