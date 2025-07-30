@@ -1,5 +1,703 @@
 <!DOCTYPE html>
 <html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏥 手術分析ダッシュボード</title>
+    <style>
+            :root {
+                /* === 統一カラーパレット === */
+                --primary-color: #667eea;
+                --primary-dark: #5a67d8;
+                --success-color: #10B981;
+                --info-color: #3B82F6;
+                --warning-color: #F59E0B;
+                --danger-color: #EF4444;
+                
+                /* === 統一テキストカラー === */
+                --text-primary: #1F2937;
+                --text-secondary: #6B7280;
+                --text-muted: #9CA3AF;
+                --text-light: #F3F4F6;
+                
+                /* === 統一スペーシング === */
+                --card-padding: 20px;
+                --card-gap: 16px;
+                --border-radius: 12px;
+                --transition: all 0.3s ease;
+                
+                /* === 統一シャドウ === */
+                --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+                --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+                --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.12);
+            }
+        
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background: #f5f5f5;
+                color: var(--text-primary);
+                line-height: 1.6;
+            }
+            
+            .header {
+                text-align: center;
+                padding: 24px 20px;
+                background: white;
+                box-shadow: var(--shadow-md);
+                margin-bottom: 20px;
+                position: relative;
+            }
+            
+            .header h1 {
+                font-size: 2.2em;
+                margin: 0 0 10px 0;
+                color: var(--text-primary);
+                font-weight: 700;
+            }
+            
+            .header-subtitle {
+                color: var(--text-secondary);
+                font-size: 1.1em;
+                font-weight: 500;
+            }
+            
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 0 20px;
+            }
+            
+            /* === 情報ボタン === */
+            .info-button {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                background: var(--primary-color);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: var(--transition);
+                box-shadow: var(--shadow-sm);
+            }
+            
+            .info-button:hover {
+                background: var(--primary-dark);
+                transform: translateY(-2px);
+                box-shadow: var(--shadow-md);
+            }
+            
+            /* === 情報パネルオーバーレイ === */
+            .info-overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 999;
+                animation: fadeIn 0.3s ease;
+            }
+            
+            /* === 情報パネル === */
+            .info-panel {
+                display: none;
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 90%;
+                max-width: 800px;
+                max-height: 80vh;
+                background: white;
+                border-radius: 16px;
+                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+                z-index: 1000;
+                overflow: hidden;
+                animation: slideIn 0.3s ease;
+            }
+            
+            @keyframes slideIn {
+                from {
+                    transform: translate(-50%, -45%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translate(-50%, -50%);
+                    opacity: 1;
+                }
+            }
+            
+            .info-panel-header {
+                background: var(--primary-color);
+                color: white;
+                padding: 20px 24px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            
+            .info-panel-header h2 {
+                margin: 0;
+                font-size: 1.4em;
+                font-weight: 700;
+            }
+            
+            .close-button {
+                background: none;
+                border: none;
+                color: white;
+                font-size: 24px;
+                cursor: pointer;
+                padding: 0;
+                width: 32px;
+                height: 32px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 4px;
+                transition: background 0.2s;
+            }
+            
+            .close-button:hover {
+                background: rgba(255, 255, 255, 0.2);
+            }
+            
+            .info-panel-content {
+                padding: 24px;
+                overflow-y: auto;
+                max-height: calc(80vh - 80px);
+            }
+            
+            .info-section {
+                margin-bottom: 32px;
+            }
+            
+            .info-section h3 {
+                color: var(--text-primary);
+                margin-bottom: 16px;
+                font-size: 1.2em;
+                font-weight: 600;
+                border-bottom: 2px solid #E5E7EB;
+                padding-bottom: 8px;
+            }
+            
+            /* === タブナビゲーション === */
+            .view-selector {
+                background: white;
+                border-radius: var(--border-radius);
+                padding: 20px;
+                margin-bottom: 24px;
+                box-shadow: var(--shadow-sm);
+            }
+            
+            .view-tabs {
+                display: flex;
+                gap: 8px;
+                justify-content: center;
+                flex-wrap: wrap;
+            }
+            
+            .view-tab {
+                background: var(--text-light);
+                border: 2px solid #E5E7EB;
+                border-radius: 8px;
+                padding: 12px 20px;
+                cursor: pointer;
+                transition: var(--transition);
+                font-weight: 600;
+                font-size: 14px;
+                color: var(--text-secondary);
+                user-select: none;
+            }
+            
+            .view-tab:hover {
+                background: #E5E7EB;
+                transform: translateY(-1px);
+                box-shadow: var(--shadow-sm);
+            }
+            
+            .view-tab.active {
+                background: var(--primary-color);
+                color: white;
+                border-color: var(--primary-color);
+                box-shadow: var(--shadow-md);
+            }
+            
+            /* === コンテンツエリア === */
+            .view-content {
+                display: none;
+                opacity: 0;
+                transition: opacity 0.3s ease;
+            }
+            
+            .view-content.active {
+                display: block;
+                opacity: 1;
+                animation: fadeIn 0.3s ease;
+            }
+            
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            
+            /* === 統一メトリクスカードシステム === */
+            .grid-container {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: var(--card-gap);
+                margin: 24px 0;
+            }
+            
+            .metric-card {
+                background: white;
+                border-radius: var(--border-radius);
+                padding: var(--card-padding);
+                box-shadow: var(--shadow-sm);
+                border: 1px solid #E5E7EB;
+                transition: var(--transition);
+                position: relative;
+                overflow: hidden;
+                min-height: 140px;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+            }
+            
+            .metric-card:hover {
+                transform: translateY(-2px);
+                box-shadow: var(--shadow-lg);
+            }
+            
+            /* === 統一カラーインジケーター === */
+            .metric-card::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 4px;
+                background: #E5E7EB;
+            }
+            
+            .metric-card.success::before { background: var(--success-color); }
+            .metric-card.warning::before { background: var(--warning-color); }
+            .metric-card.danger::before { background: var(--danger-color); }
+            .metric-card.info::before { background: var(--info-color); }
+            
+            /* === 統一テキストスタイル === */
+            .metric-title {
+                font-size: 1.0em;
+                font-weight: 600;
+                color: var(--text-primary);
+                margin-bottom: 16px;
+                line-height: 1.3;
+            }
+            
+            .metric-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 14px;
+                margin-bottom: 8px;
+                line-height: 1.4;
+            }
+            
+            .metric-row span:first-child {
+                color: var(--text-secondary);
+                font-weight: 500;
+            }
+            
+            .metric-value-row {
+                font-weight: 700;
+                color: var(--text-primary);
+                font-size: 15px;
+            }
+            
+            .achievement-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 16px;
+                font-weight: 700;
+                margin-top: 12px;
+                padding-top: 8px;
+                border-top: 1px solid #F3F4F6;
+            }
+            
+            .achievement-row span:first-child {
+                color: var(--text-secondary);
+                font-size: 14px;
+            }
+            
+            /* === パフォーマンス別カラー === */
+            .metric-card.success .achievement-row span:last-child {
+                color: var(--success-color);
+            }
+            
+            .metric-card.warning .achievement-row span:last-child {
+                color: var(--warning-color);
+            }
+            
+            .metric-card.danger .achievement-row span:last-child {
+                color: var(--danger-color);
+            }
+            
+            .metric-card.info .achievement-row span:last-child {
+                color: var(--info-color);
+            }
+            
+            /* === プログレスバー === */
+            .progress-bar {
+                background-color: #F3F4F6;
+                border-radius: 4px;
+                height: 6px;
+                margin-top: 8px;
+                overflow: hidden;
+            }
+            
+            .progress-fill {
+                height: 100%;
+                border-radius: 4px;
+                transition: width 0.3s ease;
+            }
+            
+            .metric-card.success .progress-fill { background: var(--success-color); }
+            .metric-card.warning .progress-fill { background: var(--warning-color); }
+            .metric-card.danger .progress-fill { background: var(--danger-color); }
+            .metric-card.info .progress-fill { background: var(--info-color); }
+            
+            /* === サマリー統計 === */
+            .summary {
+                background: white;
+                padding: 24px;
+                border-radius: var(--border-radius);
+                margin-bottom: 24px;
+                box-shadow: var(--shadow-sm);
+                text-align: center;
+            }
+            
+            .summary h2 {
+                color: var(--text-primary);
+                margin-bottom: 20px;
+                font-size: 1.4em;
+                font-weight: 700;
+            }
+            
+            .summary-stats {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 20px;
+                margin-top: 20px;
+            }
+            
+            .stat-item {
+                padding: 16px;
+                background: #F9FAFB;
+                border-radius: 8px;
+                border: 1px solid #F3F4F6;
+            }
+            
+            .stat-value {
+                font-size: 24px;
+                font-weight: 700;
+                color: var(--primary-color);
+                margin-bottom: 4px;
+            }
+            
+            .stat-label {
+                font-size: 14px;
+                color: var(--text-secondary);
+                font-weight: 500;
+            }
+            
+            /* === ハイスコアランキング === */
+            .stats-highlight {
+                background: #F9FAFB;
+                padding: 24px;
+                border-radius: var(--border-radius);
+                margin-bottom: 32px;
+                text-align: center;
+                border: 1px solid #F3F4F6;
+            }
+            
+            .stats-highlight h2 {
+                margin: 0 0 8px 0;
+                color: var(--text-primary);
+                font-size: 1.5em;
+                font-weight: 700;
+            }
+            
+            .ranking-section {
+                margin-bottom: 32px;
+            }
+            
+            .ranking-card {
+                background: white;
+                border: 2px solid #E5E7EB;
+                border-radius: var(--border-radius);
+                padding: 24px;
+                margin-bottom: 16px;
+                box-shadow: var(--shadow-sm);
+                transition: var(--transition);
+            }
+            
+            .ranking-card:hover {
+                transform: translateY(-2px);
+                box-shadow: var(--shadow-md);
+            }
+            
+            .ranking-card.rank-1 {
+                border-color: #ffd700;
+                background: linear-gradient(135deg, #fffef5 0%, #fffdf0 100%);
+            }
+            
+            .ranking-card.rank-2 {
+                border-color: #c0c0c0;
+                background: linear-gradient(135deg, #fafafa 0%, #f8f8f8 100%);
+            }
+            
+            .ranking-card.rank-3 {
+                border-color: #cd7f32;
+                background: linear-gradient(135deg, #fffaf5 0%, #fff8f0 100%);
+            }
+            
+            .rank-header {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 12px;
+            }
+            
+            .medal {
+                font-size: 2em;
+            }
+            
+            .rank-label {
+                font-weight: 600;
+                color: var(--text-secondary);
+                font-size: 14px;
+            }
+            
+            .dept-name {
+                font-size: 1.4em;
+                font-weight: 700;
+                margin-bottom: 12px;
+                color: var(--text-primary);
+            }
+            
+            .score-info {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 8px;
+            }
+            
+            .achievement {
+                color: var(--text-secondary);
+                font-size: 1.0em;
+                font-weight: 500;
+            }
+            
+            .score-value {
+                font-size: 2.2em;
+                font-weight: 700;
+                color: var(--danger-color);
+                text-align: right;
+            }
+            
+            /* === トレンドチャート === */
+            .trend-chart {
+                background: white;
+                border-radius: var(--border-radius);
+                padding: 32px;
+                margin: 32px 0;
+                box-shadow: var(--shadow-sm);
+                border: 1px solid #F3F4F6;
+            }
+            
+            .trend-chart h3 {
+                margin: 0 0 24px 0;
+                color: var(--text-primary);
+                font-size: 1.2em;
+                font-weight: 600;
+            }
+            
+            #monthlyTrendChart, #weeklyTrendChart {
+                max-width: 100%;
+                height: 100%;
+            }
+            
+            /* === 分析セクション === */
+            .analysis-section {
+                background: white;
+                border-radius: var(--border-radius);
+                padding: 32px;
+                box-shadow: var(--shadow-sm);
+                margin-bottom: 32px;
+                border: 1px solid #F3F4F6;
+            }
+            
+            .analysis-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 20px;
+                margin-top: 24px;
+            }
+            
+            .analysis-card {
+                background: #F9FAFB;
+                border-left: 4px solid var(--primary-color);
+                border-radius: var(--border-radius);
+                padding: 20px;
+                border: 1px solid #F3F4F6;
+            }
+            
+            .analysis-card.success {
+                border-left-color: var(--success-color);
+                background: rgba(16, 185, 129, 0.05);
+            }
+            
+            .analysis-card.warning {
+                border-left-color: var(--warning-color);
+                background: rgba(245, 158, 11, 0.05);
+            }
+            
+            .analysis-card.danger {
+                border-left-color: var(--danger-color);
+                background: rgba(239, 68, 68, 0.05);
+            }
+            
+            .analysis-card.info {
+                border-left-color: var(--info-color);
+                background: rgba(59, 130, 246, 0.05);
+            }
+            
+            .analysis-card h3 {
+                margin-top: 0;
+                margin-bottom: 16px;
+                font-size: 1.1em;
+                font-weight: 600;
+            }
+            
+            .analysis-card ul {
+                margin: 0;
+                padding-left: 20px;
+                line-height: 1.6;
+            }
+            
+            .analysis-card li {
+                margin-bottom: 8px;
+                font-size: 14px;
+            }
+            
+            /* === フッター === */
+            .footer {
+                text-align: center;
+                margin-top: 48px;
+                color: var(--text-muted);
+                font-size: 12px;
+                padding: 24px;
+                background: white;
+                border-radius: var(--border-radius);
+                box-shadow: var(--shadow-sm);
+            }
+            
+            /* === レスポンシブ対応 === */
+            @media (max-width: 768px) {
+                .container {
+                    padding: 0 12px;
+                }
+                
+                .header {
+                    padding: 20px 16px;
+                }
+                
+                .header h1 {
+                    font-size: 1.8em;
+                }
+                
+                .view-tabs {
+                    flex-direction: column;
+                    gap: 8px;
+                }
+                
+                .view-tab {
+                    padding: 12px 16px;
+                    font-size: 13px;
+                }
+                
+                .grid-container {
+                    grid-template-columns: 1fr;
+                    gap: 12px;
+                }
+                
+                .metric-card {
+                    padding: 16px;
+                    min-height: 120px;
+                }
+                
+                .summary-stats {
+                    grid-template-columns: 1fr;
+                    gap: 12px;
+                }
+                
+                .analysis-grid {
+                    grid-template-columns: 1fr;
+                }
+                
+                .trend-chart {
+                    padding: 20px;
+                }
+                
+                .ranking-card {
+                    padding: 20px;
+                }
+                
+                .info-button {
+                    top: 60px;
+                    right: 16px;
+                    padding: 6px 12px;
+                    font-size: 13px;
+                }
+                
+                .info-panel {
+                    width: 95%;
+                    max-height: 90vh;
+                }
+                
+                .info-panel-content {
+                    padding: 16px;
+                    max-height: calc(90vh - 70px);
+                }
+            }
+            
+            @media (max-width: 480px) {
+                .header h1 {
+                    font-size: 1.5em;
+                }
+                
+                .metric-card {
+                    padding: 14px;
+                }
+                
+                .score-value {
+                    font-size: 1.8em;
+                }
+                
+                .dept-name {
+                    font-size: 1.2em;
+                }
+            }
+            </style>
+</head>
 <body>
     
         <div class="header">
@@ -44,159 +742,9 @@
                         </tbody>
                     </table>
                 </div>
-                <div class="info-section">
-                    <h3>🎯 評価基準</h3>
-                </div>
-                
-                <div class="info-section score-calculation-section">
-                    <h3>🏆 ハイスコア計算方法（100点満点）</h3>
-                    <div class="score-explanation">
-                        <p class="score-intro">診療科ランキングの総合スコアは、以下の3つの指標から構成されています：</p>
-                        
-                        <div class="score-component">
-                            <h4>1. 🎯 全身麻酔手術件数（70点満点）- 最重要指標</h4>
-                            <div class="score-detail">
-                                <p>週単位の全身麻酔手術件数（麻酔時間20分以上）を多角的に評価します。</p>
-                                
-                                <div class="score-breakdown">
-                                    <h5>配点内訳：</h5>
-                                    <ul>
-                                        <li><strong>直近週達成度（30点）</strong>
-                                            <ul>
-                                                <li>CSV目標値に対する達成率で評価</li>
-                                                <li>達成率100%以上：30点</li>
-                                                <li>達成率90-99%：24点</li>
-                                                <li>達成率80-89%：18点</li>
-                                                <li>達成率70-79%：12点</li>
-                                                <li>達成率70%未満：0-6点</li>
-                                            </ul>
-                                        </li>
-                                        <li><strong>改善度（20点）</strong>
-                                            <ul>
-                                                <li>評価期間の平均と過去期間の平均を比較</li>
-                                                <li>改善率+20%以上：20点</li>
-                                                <li>改善率+10-19%：15点</li>
-                                                <li>改善率+5-9%：10点</li>
-                                                <li>改善率0-4%：5点</li>
-                                                <li>マイナス成長：0点</li>
-                                            </ul>
-                                        </li>
-                                        <li><strong>安定性（15点）</strong>
-                                            <ul>
-                                                <li>週次実績の変動係数で評価</li>
-                                                <li>変動係数10%未満：15点（非常に安定）</li>
-                                                <li>変動係数10-20%：12点（安定）</li>
-                                                <li>変動係数20-30%：8点（やや不安定）</li>
-                                                <li>変動係数30-40%：4点（不安定）</li>
-                                                <li>変動係数40%以上：0点（極めて不安定）</li>
-                                            </ul>
-                                        </li>
-                                        <li><strong>持続性（5点）</strong>
-                                            <ul>
-                                                <li>週次トレンドの傾きで評価</li>
-                                                <li>上昇トレンド：5点</li>
-                                                <li>横ばいトレンド：3点</li>
-                                                <li>下降トレンド：0点</li>
-                                            </ul>
-                                        </li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="score-component">
-                            <h4>2. 📊 全手術件数（15点満点）</h4>
-                            <div class="score-detail">
-                                <p>診療科の全体的な手術活動量を評価します。</p>
-                                
-                                <div class="score-breakdown">
-                                    <h5>配点内訳：</h5>
-                                    <ul>
-                                        <li><strong>診療科間ランキング（10点）</strong>
-                                            <ul>
-                                                <li>1位：10点</li>
-                                                <li>2位：8点</li>
-                                                <li>3位：6点</li>
-                                                <li>4位：4点</li>
-                                                <li>5位：2点</li>
-                                                <li>6位以下：0点</li>
-                                            </ul>
-                                        </li>
-                                        <li><strong>改善度（5点）</strong>
-                                            <ul>
-                                                <li>前期比+10%以上：5点</li>
-                                                <li>前期比+5-9%：3点</li>
-                                                <li>前期比0-4%：1点</li>
-                                                <li>前期比マイナス：0点</li>
-                                            </ul>
-                                        </li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="score-component">
-                            <h4>3. ⏱️ 総手術時間（15点満点）</h4>
-                            <div class="score-detail">
-                                <p>手術室の稼働効率と貢献度を評価します。</p>
-                                
-                                <div class="score-breakdown">
-                                    <h5>配点内訳：</h5>
-                                    <ul>
-                                        <li><strong>診療科間ランキング（10点）</strong>
-                                            <ul>
-                                                <li>1位：10点</li>
-                                                <li>2位：8点</li>
-                                                <li>3位：6点</li>
-                                                <li>4位：4点</li>
-                                                <li>5位：2点</li>
-                                                <li>6位以下：0点</li>
-                                            </ul>
-                                        </li>
-                                        <li><strong>改善度（5点）</strong>
-                                            <ul>
-                                                <li>前期比+10%以上：5点</li>
-                                                <li>前期比+5-9%：3点</li>
-                                                <li>前期比0-4%：1点</li>
-                                                <li>前期比マイナス：0点</li>
-                                            </ul>
-                                        </li>
-                                    </ul>
-                                </div>
-                                
-                                <div class="calculation-note">
-                                    <p><strong>⚠️ 手術時間の計算方法：</strong></p>
-                                    <ul>
-                                        <li>入室時刻から退室時刻までの経過時間</li>
-                                        <li>深夜跨ぎ対応（23:30入室→1:15退室 = 1時間45分）</li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="total-score-summary">
-                            <h4>📊 総合スコア = 全身麻酔(70点) + 全手術(15点) + 手術時間(15点)</h4>
-                            <p class="score-note">※ 最高100点満点で評価</p>
-                            
-                            <div class="grade-system">
-                                <h5>グレード判定：</h5>
-                                <ul class="grade-list">
-                                    <li><span class="grade-badge grade-s">S</span> 90点以上（卓越したパフォーマンス）</li>
-                                    <li><span class="grade-badge grade-a">A</span> 80-89点（優秀なパフォーマンス）</li>
-                                    <li><span class="grade-badge grade-b">B</span> 70-79点（良好なパフォーマンス）</li>
-                                    <li><span class="grade-badge grade-c">C</span> 60-69点（標準的なパフォーマンス）</li>
-                                    <li><span class="grade-badge grade-d">D</span> 60点未満（改善が必要）</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-            <!-- 既存の用語説明・計算方法・活用のヒントセクション -->
-            <!-- 省略（変更なし） -->
+            </div>
         </div>
-    </div>
-    
+        
     
     <div class="container">
         
@@ -357,7 +905,7 @@
                                 borderDash: [5, 5],
                                 tension: 0.1,
                                 pointRadius: 4,
-                                spanGaps: true, // null値を線で繋がない
+                                spanGaps: true,
                             },
                             {
                                 label: '目標ライン',
@@ -867,30 +1415,6 @@
                     <h2>📈 詳細分析・改善提案</h2>
                 </div>
                 
-                <div class="grid-container" style="grid-template-columns: 1fr;">
-                    
-            <div class="metric-card warning">
-                <div class="metric-title">📊 統合パフォーマンス指標</div>
-                <div class="metric-row">
-                    <span>年度成長率</span>
-                    <span class="metric-value-row">+11.7%</span>
-                </div>
-                <div class="metric-row">
-                    <span>手術室稼働率</span>
-                    <span class="metric-value-row">64.3%</span>
-                </div>
-                <div class="metric-row">
-                    <span>年度末予測</span>
-                    <span class="metric-value-row">4,586件</span>
-                </div>
-                <div class="achievement-row">
-                    <span>総合評価</span>
-                    <span>良好</span>
-                </div>
-            </div>
-            
-                </div>
-                
                 <div class="analysis-section">
                     <h2>📊 年度目標達成分析</h2>
                     <div class="analysis-grid">
@@ -902,18 +1426,6 @@
                     <li>手術室稼働率64.3%は改善余地あり</li>
                     <li>年度末予測4,586件は過去最高水準</li>
                     <li>継続的な成長基調を維持</li>
-                </ul>
-            </div>
-            
-                        
-            <div class="analysis-card info">
-                <h3>🎯 目標達成施策</h3>
-                <ul>
-                    <li>手術室稼働率を85%以上に向上させる</li>
-                    <li>診療科間の手術枠最適化を実施する</li>
-                    <li>緊急手術体制の強化を検討する</li>
-                    <li>年度末目標：4,723件を目指す</li>
-                    <li>現在の成長ペースを維持する</li>
                 </ul>
             </div>
             
@@ -974,5 +1486,5 @@
             <div>手術分析ダッシュボード v2.0</div>
         </div>
         
-    </body>
+</body>
 </html>
