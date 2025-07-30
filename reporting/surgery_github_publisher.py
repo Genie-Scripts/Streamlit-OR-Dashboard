@@ -2619,16 +2619,15 @@ class SurgeryGitHubPublisher:
         # 既存のCSSと情報パネル用CSSを結合して返す
         return base_css + info_panel_css
 
-
-    # === 既存関数（変更なし） ===
-    
     def _upload_to_github(self, html_content: str) -> Tuple[bool, str]:
-        """GitHubにHTMLファイルと設定ファイルをアップロード"""
+        """GitHubにHTMLファイルをアップロード"""
         try:
-            # docs/index.html のみワークフローを起動し、他はスキップする
+            # <<< 修正点 >>>
+            # docs/index.html のみにアップロードし、ワークフローを起動させる
+            # ルートの index.html と .nojekyll のアップロードは削除
             self._upload_file('docs/index.html', html_content, skip_ci=False)
-            self._upload_file('index.html', html_content, skip_ci=True)
-            self._upload_file('.nojekyll', '', skip_ci=True)
+            
+            # ワークフローファイルはこれまで通り確認・作成する
             self._ensure_github_pages_workflow(skip_ci=True)
             
             return True, "手術分析ダッシュボードの公開が完了しました"
