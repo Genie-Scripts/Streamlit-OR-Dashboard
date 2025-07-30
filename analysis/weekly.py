@@ -3,15 +3,23 @@ import pandas as pd
 import numpy as np
 
 def get_analysis_end_date(latest_date):
-    """分析の最終日（最新の完全な週の最終日曜日）を計算する"""
+    """
+    分析の最終日（latest_date以前の直近の日曜日）を計算する。
+    これにより、月曜から日曜までを1週間とする厳密な週次分析が可能になる。
+    """
     if pd.isna(latest_date):
         return None
-    # 最新データが日曜日の場合、その日を返す
-    if latest_date.dayofweek == 6:
+    
+    # latest_dateの曜日を計算 (月曜=0, 日曜=6)
+    day_of_week = latest_date.dayofweek
+    
+    # 基準日が日曜日の場合、その日を分析終了日とする
+    if day_of_week == 6:
         return latest_date
-    # 月曜〜土曜の場合、その前の日曜日を返す
+    # 基準日が月曜から土曜の場合、その前の日曜日を分析終了日とする
     else:
-        return latest_date - pd.to_timedelta(latest_date.dayofweek + 1, unit='d')
+        days_to_subtract = day_of_week + 1
+        return latest_date - pd.to_timedelta(days_to_subtract, unit='d')
 
 def get_summary(df, department=None, use_complete_weeks=True):
     """
