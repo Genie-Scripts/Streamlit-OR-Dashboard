@@ -1,4 +1,4 @@
-# reporting/surgery_github_publisher.py (病院全体サマリ デザイン統一・レイアウト変更版)
+# reporting/surgery_github_publisher.py (分析基準日を反映させる修正版)
 
 import pandas as pd
 import logging
@@ -8,6 +8,9 @@ from typing import Dict, Any, Optional, Tuple
 import base64
 import requests
 import json
+
+# <<< 修正点: SessionManagerをインポートして分析基準日を取得できるようにする >>>
+from ui.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +25,11 @@ class SurgeryGitHubPublisher:
         self.branch = branch
         self.base_url = "https://api.github.com"
         
+    # <<< 修正点: メソッドの引数に analysis_base_date を追加 >>>
     def publish_surgery_dashboard(self, df: pd.DataFrame, target_dict: Dict[str, float], 
-                                period: str = "直近12週", 
-                                report_type: str = "integrated_dashboard") -> Tuple[bool, str]:
+                                  analysis_base_date: pd.Timestamp, # <<< 引数追加
+                                  period: str = "直近12週", 
+                                  report_type: str = "integrated_dashboard") -> Tuple[bool, str]:
         """手術分析ダッシュボードを公開（4タブ統合版）"""
         try:
             logger.info(f"🚀 統合手術分析ダッシュボード公開開始: 4タブ構成")
@@ -32,7 +37,8 @@ class SurgeryGitHubPublisher:
             # dfをインスタンス変数として保存
             self.df = df
             
-            html_content = self._generate_integrated_html_content(df, target_dict, period)
+            # <<< 修正点: HTMLコンテンツ生成メソッドに analysis_base_date を渡す >>>
+            html_content = self._generate_integrated_html_content(df, target_dict, period, analysis_base_date)
             
             if not html_content:
                 return False, "HTMLコンテンツの生成に失敗しました"
@@ -50,16 +56,15 @@ class SurgeryGitHubPublisher:
             logger.error(f"公開エラー: {e}")
             return False, str(e)
     
-    # === ▼▼▼ 新しい関数を追加 ▼▼▼ ===
-    def _get_recent_week_kpi_data(self, df: pd.DataFrame, latest_date: pd.Timestamp) -> Dict[str, Any]:
+    def _get_recent_week_kpi_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> Dict[str, Any]:
         """直近週のKPIデータを計算"""
         try:
             from analysis.weekly import get_analysis_end_date
 
-            analysis_end_date = get_analysis_end_date(latest_date)
+            # <<< 修正点: 引数の analysis_base_date を使用 >>>
+            analysis_end_date = get_analysis_end_date(analysis_base_date)
             if not analysis_end_date: return {}
             
-            # 直近週の期間を定義
             one_week_ago = analysis_end_date - pd.Timedelta(days=6)
             recent_week_df = df[(df['手術実施日_dt'] >= one_week_ago) & (df['手術実施日_dt'] <= analysis_end_date)]
 
@@ -69,12 +74,8 @@ class SurgeryGitHubPublisher:
             gas_df = recent_week_df[recent_week_df['is_gas_20min']]
             gas_weekday_df = gas_df[gas_df['is_weekday']]
             
-            # 週の平日日数を計算
             num_weekdays = len(pd.bdate_range(start=one_week_ago, end=analysis_end_date))
-            if num_weekdays == 0:
-                daily_avg = 0.0
-            else:
-                daily_avg = len(gas_weekday_df) / num_weekdays
+            daily_avg = len(gas_weekday_df) / num_weekdays if num_weekdays > 0 else 0.0
 
             return {
                 "全身麻酔手術件数 (直近週)": len(gas_df),
@@ -85,49 +86,48 @@ class SurgeryGitHubPublisher:
             logger.error(f"直近週KPI取得エラー: {e}")
             return {}
 
+    # <<< 修正点: メソッドの引数に analysis_base_date を追加 >>>
     def _generate_integrated_html_content(self, df: pd.DataFrame, target_dict: Dict[str, float], 
-                                        period: str) -> Optional[str]:
+                                          period: str, analysis_base_date: pd.Timestamp) -> Optional[str]:
         """統合HTMLコンテンツを生成（4タブ構成）"""
         try:
-            # 最新日付取得
-            latest_date = df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns else datetime.now()
-            
-            # 基本データ収集
-            basic_kpi = self._get_basic_kpi_data(df, latest_date)
-            yearly_data = self._get_yearly_comparison_data(df, latest_date)
+            # <<< 修正点: 各データ取得メソッドに analysis_base_date を渡す >>>
+            basic_kpi = self._get_basic_kpi_data(df, analysis_base_date)
+            yearly_data = self._get_yearly_comparison_data(df, analysis_base_date)
             high_score_data = self._get_high_score_data(df, target_dict, period)
-            dept_performance = self._get_department_performance_data(df, target_dict, latest_date)
-            recent_week_kpi = self._get_recent_week_kpi_data(df, latest_date) # <<< 直近週データを追加
+            dept_performance = self._get_department_performance_data(df, target_dict, analysis_base_date)
+            recent_week_kpi = self._get_recent_week_kpi_data(df, analysis_base_date)
             
-            # 統合HTML生成
             return self._generate_4tab_dashboard_html(
                 yearly_data=yearly_data,
                 basic_kpi=basic_kpi,
                 high_score_data=high_score_data,
                 dept_performance=dept_performance,
                 period=period,
-                recent_week_kpi=recent_week_kpi # <<< 直近週データを渡す
+                recent_week_kpi=recent_week_kpi,
+                analysis_base_date=analysis_base_date # <<< HTML生成メソッドにも渡す
             )
             
         except Exception as e:
             logger.error(f"統合HTMLコンテンツ生成エラー: {e}")
-            # フォールバック: 既存のTOP3のみ表示
             return self._generate_fallback_html(df, target_dict, period)
     
-    def _get_basic_kpi_data(self, df: pd.DataFrame, latest_date: pd.Timestamp) -> Dict[str, Any]:
+    # <<< 修正点: 引数を latest_date から analysis_base_date に変更 >>>
+    def _get_basic_kpi_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> Dict[str, Any]:
         """基本KPIデータ取得"""
         try:
             from analysis.ranking import get_kpi_summary
-            return get_kpi_summary(df, latest_date)
+            return get_kpi_summary(df, analysis_base_date)
         except Exception as e:
             logger.error(f"基本KPI取得エラー: {e}")
             return {}
     
-    def _get_yearly_comparison_data(self, df: pd.DataFrame, latest_date: pd.Timestamp) -> Dict[str, Any]:
+    # <<< 修正点: 引数を latest_date から analysis_base_date に変更 >>>
+    def _get_yearly_comparison_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> Dict[str, Any]:
         """年度比較データ取得"""
         try:
             from analysis.ranking import calculate_yearly_surgery_comparison
-            return calculate_yearly_surgery_comparison(df, latest_date)
+            return calculate_yearly_surgery_comparison(df, analysis_base_date)
         except Exception as e:
             logger.error(f"年度比較データ取得エラー: {e}")
             return {}
@@ -141,19 +141,22 @@ class SurgeryGitHubPublisher:
             logger.error(f"ハイスコアデータ取得エラー: {e}")
             return []
     
+    # <<< 修正点: 引数を latest_date から analysis_base_date に変更 >>>
     def _get_department_performance_data(self, df: pd.DataFrame, target_dict: Dict[str, float], 
-                                       latest_date: pd.Timestamp) -> pd.DataFrame:
+                                         analysis_base_date: pd.Timestamp) -> pd.DataFrame:
         """診療科別パフォーマンスデータ取得"""
         try:
             from analysis.ranking import get_department_performance_summary
-            return get_department_performance_summary(df, target_dict, latest_date)
+            return get_department_performance_summary(df, target_dict, analysis_base_date)
         except Exception as e:
             logger.error(f"診療科別パフォーマンスデータ取得エラー: {e}")
             return pd.DataFrame()
     
+    # <<< 修正点: メソッドの引数に analysis_base_date を追加 >>>
     def _generate_4tab_dashboard_html(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any],
                                     high_score_data: list, dept_performance: pd.DataFrame,
-                                    period: str, recent_week_kpi: Dict[str, Any]) -> str: # <<< 引数追加
+                                    period: str, recent_week_kpi: Dict[str, Any],
+                                    analysis_base_date: pd.Timestamp) -> str:
         """4タブダッシュボードHTML生成"""
         try:
             current_date = datetime.now().strftime('%Y年%m月%d日')
@@ -172,7 +175,7 @@ class SurgeryGitHubPublisher:
     <div class="container">
         {self._generate_tab_navigation_html()}
         
-        {self._generate_hospital_summary_tab(yearly_data, basic_kpi, recent_week_kpi)}
+        {self._generate_hospital_summary_tab(yearly_data, basic_kpi, recent_week_kpi, analysis_base_date)}
         
         {self._generate_high_score_tab(high_score_data, period)}
         
@@ -296,7 +299,7 @@ class SurgeryGitHubPublisher:
                         </div>
                         
                         <div class="score-component">
-                            <h4>2. 📊 全手術件数（15点満点）</h4>
+                            <h4>2. � 全手術件数（15点満点）</h4>
                             <div class="score-detail">
                                 <p>診療科の全体的な手術活動量を評価します。</p>
                                 
@@ -388,6 +391,7 @@ class SurgeryGitHubPublisher:
         </div>
     </div>
     """
+
 
     def _generate_tab_navigation_html(self) -> str:
         """タブナビゲーションHTML生成（統一デザイン版）"""
@@ -583,19 +587,16 @@ class SurgeryGitHubPublisher:
         </div>
     """
 
-    def _generate_hospital_summary_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any], recent_week_kpi: Dict[str, Any]) -> str:
+    def _generate_hospital_summary_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any], 
+                                     recent_week_kpi: Dict[str, Any], analysis_base_date: pd.Timestamp) -> str:
         """病院全体手術サマリタブ生成（デザイン統一版 + 週別推移チャート追加）"""
         try:
-            # 他のタブとデザインを統一した新しいHTMLを生成
             summary_html = self._generate_unified_hospital_summary_html(yearly_data, basic_kpi, recent_week_kpi)
-            
-            # 月別トレンドチャート
             monthly_trend_chart = self._generate_monthly_trend_section(yearly_data)
             
-            # 週別トレンドチャートを追加
             if hasattr(self, 'df'):
-                latest_date = self.df['手術実施日_dt'].max() if '手術実施日_dt' in self.df.columns else pd.Timestamp.now()
-                weekly_trend_data = self._get_weekly_trend_data(self.df, latest_date)
+                # <<< 修正点: ここで analysis_base_date を使う >>>
+                weekly_trend_data = self._get_weekly_trend_data(self.df, analysis_base_date)
                 weekly_trend_chart = self._generate_weekly_trend_section(weekly_trend_data)
             else:
                 weekly_trend_chart = self._generate_fallback_weekly_chart()
@@ -907,14 +908,14 @@ class SurgeryGitHubPublisher:
             df['手術実施日_dt'] = pd.to_datetime(df['手術実施日_dt'], errors='coerce')
             df.dropna(subset=['手術実施日_dt'], inplace=True)
             
-            latest_date = df['手術実施日_dt'].max()
+            analysis_base_date = df['手術実施日_dt'].max()
             
             result = []
             
             # 常に遡って6ヶ月分のデータを表示
             for i in range(6):
                 # 基準となる月を計算 (5ヶ月前から現在月まで)
-                target_month_date = latest_date - pd.DateOffset(months=i)
+                target_month_date = analysis_base_date - pd.DateOffset(months=i)
                 current_year = target_month_date.year
                 current_month = target_month_date.month
 
@@ -934,14 +935,14 @@ class SurgeryGitHubPublisher:
                 ]
                 
                 month_name = f"{current_year % 100}年{current_month}月"
-                is_partial = (current_year == latest_date.year and current_month == latest_date.month)
+                is_partial = (current_year == analysis_base_date.year and current_month == analysis_base_date.month)
                 
                 current_count = len(current_month_df)
                 last_year_count = len(last_year_month_df)
 
                 # 月の途中までのデータについては、前年データも同日までの比較にする
-                if is_partial and latest_date.day < pd.Timestamp(latest_date).days_in_month:
-                    day_of_month = latest_date.day
+                if is_partial and analysis_base_date.day < pd.Timestamp(analysis_base_date).days_in_month:
+                    day_of_month = analysis_base_date.day
                     current_count = len(current_month_df[current_month_df['手術実施日_dt'].dt.day <= day_of_month])
                     last_year_count = len(last_year_month_df[last_year_month_df['手術実施日_dt'].dt.day <= day_of_month])
                     month_name += f" ({day_of_month}日時点)"
@@ -1180,16 +1181,14 @@ class SurgeryGitHubPublisher:
             logger.error(f"フォールバックチャート生成エラー: {e}")
             return ""
             
-    # reporting/surgery_github_publisher.py に追加する関数
-    def _get_weekly_trend_data(self, df: pd.DataFrame, latest_date: pd.Timestamp) -> list:
+    def _get_weekly_trend_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> list:
         """週別トレンドデータを取得"""
         try:
             from analysis.weekly import get_weekly_trend_data
-            return get_weekly_trend_data(df, latest_date, weeks=8)
+            return get_weekly_trend_data(df, analysis_base_date, weeks=8)
         except Exception as e:
             logger.error(f"週別トレンドデータ取得エラー: {e}")
             return []
-    
     
     def _generate_weekly_trend_section(self, weekly_data: list) -> str:
         """週別トレンドセクション生成（折れ線グラフ版、過去8週間表示）"""
@@ -2796,8 +2795,19 @@ def create_surgery_github_publisher_interface():
                         github_token, repo_owner, repo_name, branch
                     )
                     
+                    # <<< 修正点: SessionManager から分析基準日を取得 >>>
+                    analysis_base_date = SessionManager.get_analysis_base_date()
+                    if analysis_base_date is None:
+                        # フォールバックとしてデータの最新日を使用
+                        analysis_base_date = df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns and not df.empty else datetime.now()
+
+                    # <<< 修正点: publisherのメソッドに analysis_base_date を渡す >>>
                     success, message = publisher.publish_surgery_dashboard(
-                        df, target_dict, period, "integrated_dashboard"
+                        df,
+                        target_dict,
+                        analysis_base_date, # <<< 追加した引数
+                        period,
+                        "integrated_dashboard"
                     )
                     
                     if success:

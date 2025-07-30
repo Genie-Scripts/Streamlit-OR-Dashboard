@@ -108,10 +108,10 @@ def calculate_operating_room_utilization(df, period_df):
     except Exception:
         return 0.0
 
-def get_kpi_summary(df, latest_date):
+def get_kpi_summary(df, analysis_base_date):
     """ダッシュボード用の主要KPIサマリーを計算する"""
     if df.empty: return {}
-    analysis_end_date = weekly.get_analysis_end_date(latest_date)
+    analysis_end_date = weekly.get_analysis_end_date(analysis_base_date)
     if not analysis_end_date: return {}
     four_weeks_ago = analysis_end_date - pd.Timedelta(days=27)
     recent_df = df[(df['手術実施日_dt'] >= four_weeks_ago) & (df['手術実施日_dt'] <= analysis_end_date)]
@@ -126,13 +126,13 @@ def get_kpi_summary(df, latest_date):
     }
 
 
-def calculate_yearly_surgery_comparison(df, current_date):
+def calculate_yearly_surgery_comparison(df, analysis_base_date):
     """
     全身麻酔手術件数と稼働率の年度比較を計算
     
     Args:
         df: 手術データ
-        current_date: 現在の日付
+        analysis_base_date: 現在の日付
         
     Returns:
         dict: 年度比較結果
@@ -142,26 +142,26 @@ def calculate_yearly_surgery_comparison(df, current_date):
             return {}
         
         # 現在の年度判定（4月開始）
-        if current_date.month >= 4:
-            current_fiscal_year = current_date.year
+        if analysis_base_date.month >= 4:
+            current_fiscal_year = analysis_base_date.year
         else:
-            current_fiscal_year = current_date.year - 1
+            current_fiscal_year = analysis_base_date.year - 1
         
-        # 今年度データ（4/1 - current_date）
+        # 今年度データ（4/1 - analysis_base_date）
         current_fiscal_start = pd.Timestamp(year=current_fiscal_year, month=4, day=1)
         current_fiscal_data = df[
             (df['手術実施日_dt'] >= current_fiscal_start) & 
-            (df['手術実施日_dt'] <= current_date) &
+            (df['手術実施日_dt'] <= analysis_base_date) &
             (df['is_gas_20min'])
         ]
         
         # 昨年度同期データ（昨年4/1 - 昨年同月日）
         prev_fiscal_start = pd.Timestamp(year=current_fiscal_year-1, month=4, day=1)
         try:
-            prev_fiscal_end = pd.Timestamp(year=current_date.year-1, month=current_date.month, day=current_date.day)
+            prev_fiscal_end = pd.Timestamp(year=analysis_base_date.year-1, month=analysis_base_date.month, day=analysis_base_date.day)
         except ValueError:
             # 2月29日などの特殊ケース対応
-            prev_fiscal_end = pd.Timestamp(year=current_date.year-1, month=current_date.month, day=28)
+            prev_fiscal_end = pd.Timestamp(year=analysis_base_date.year-1, month=analysis_base_date.month, day=28)
         
         prev_fiscal_data = df[
             (df['手術実施日_dt'] >= prev_fiscal_start) & 
@@ -183,7 +183,7 @@ def calculate_yearly_surgery_comparison(df, current_date):
         current_fiscal_weekday_data = current_fiscal_data[current_fiscal_data['is_weekday']]
         
         # 今年度の開始日から今日までの平日日数を計算
-        elapsed_weekdays = len(pd.bdate_range(start=current_fiscal_start, end=current_date))
+        elapsed_weekdays = len(pd.bdate_range(start=current_fiscal_start, end=analysis_base_date))
         
         # 平日1日あたりの平均手術件数を計算
         avg_surgeries_per_weekday = len(current_fiscal_weekday_data) / elapsed_weekdays if elapsed_weekdays > 0 else 0
@@ -198,7 +198,7 @@ def calculate_yearly_surgery_comparison(df, current_date):
         
         # === 追加部分 Start ===
         # 前年度同期の稼働率を計算 (直近4週間の比較)
-        analysis_end_date = weekly.get_analysis_end_date(current_date)
+        analysis_end_date = weekly.get_analysis_end_date(analysis_base_date)
         four_weeks_ago = analysis_end_date - pd.Timedelta(days=27)
 
         # 前年度の同期間を定義
@@ -223,7 +223,7 @@ def calculate_yearly_surgery_comparison(df, current_date):
             "growth_rate": growth_rate,
             "projected_annual": projected_total,
             "period_desc": f"{current_fiscal_year}年度",
-            "comparison_period": f"{current_fiscal_start.strftime('%Y/%m/%d')} - {current_date.strftime('%Y/%m/%d')}",
+            "comparison_period": f"{current_fiscal_start.strftime('%Y/%m/%d')} - {analysis_base_date.strftime('%Y/%m/%d')}",
             "fiscal_year": current_fiscal_year,
             "prev_year_utilization_rate": prev_year_utilization_str, # <<< 追加したデータ
         }
@@ -285,7 +285,7 @@ def get_monthly_surgery_trend(df, fiscal_year):
             count = monthly_counts[monthly_counts['年月'] == period]['件数'].sum()
             
             month_name = f"{actual_month}月"
-            if actual_month == current_date.month and actual_year == current_date.year:
+            if actual_month == analysis_base_date.month and actual_year == analysis_base_date.year:
                 month_name += "（途中）"
             
             result.append({
@@ -303,12 +303,12 @@ def get_monthly_surgery_trend(df, fiscal_year):
         return []
 
 
-def safe_yearly_comparison(df, current_date):
+def safe_yearly_comparison(df, analysis_base_date):
     """
     エラー耐性のある年度比較（ラッパー関数）
     """
     try:
-        return calculate_yearly_surgery_comparison(df, current_date)
+        return calculate_yearly_surgery_comparison(df, analysis_base_date)
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"安全な年度比較計算エラー: {e}")
@@ -360,14 +360,18 @@ def get_enhanced_kpi_summary(df, latest_date):
         # フォールバックとして基本KPIのみ返却
         return get_kpi_summary(df, latest_date)
 
-def get_department_performance_summary(df, target_dict, latest_date):
+def get_department_performance_summary(df, target_dict, analysis_base_date):
     """診療科別パフォーマンスサマリーを取得（期間定義・平均計算・ソート修正版）"""
     if df.empty or not target_dict:
         return pd.DataFrame()
 
     # 1. 分析期間の正確な定義
-    # latest_dateが含まれる週の日曜日を分析終了日とする (日曜日が週の終わり weekday()==6)
-    analysis_end_date = latest_date + pd.Timedelta(days=(6 - latest_date.weekday()))
+    # <<< 修正箇所 >>>
+    # weekly.pyの共通関数を使って、分析終了日を正しく取得します
+    analysis_end_date = weekly.get_analysis_end_date(analysis_base_date)
+    if not analysis_end_date:
+        return pd.DataFrame() # 終了日が決まらない場合は空のDataFrameを返す
+
     start_date_filter = analysis_end_date - pd.Timedelta(days=27)  # 4週間前
 
     # 4週間のデータをフィルタリング

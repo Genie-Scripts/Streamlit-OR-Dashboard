@@ -2,18 +2,28 @@
 import pandas as pd
 import numpy as np
 
-def get_analysis_end_date(latest_date):
-    """分析の最終日（最新の完全な週の最終日曜日）を計算する"""
-    if pd.isna(latest_date):
+def get_analysis_end_date(base_date: pd.Timestamp) -> pd.Timestamp:
+    """
+    分析の最終日（基準日以前の、完了した最新の週の最終日曜日）を計算する
+    
+    Args:
+        base_date (pd.Timestamp): 分析の基準となる日
+    
+    Returns:
+        pd.Timestamp: 分析対象となる期間の最終日（日曜日）
+    """
+    if pd.isna(base_date):
         return None
-    # 最新データが日曜日の場合、その日を返す
-    if latest_date.dayofweek == 6:
-        return latest_date
-    # 月曜〜土曜の場合、その前の日曜日を返す
+    
+    # dayofweek: 月曜日=0, ..., 日曜日=6
+    # 基準日が日曜日 (6) なら、その日が分析終了日
+    if base_date.dayofweek == 6:
+        return base_date
+    # 月曜〜土曜の場合、その前の日曜日を分析終了日とする
     else:
-        return latest_date - pd.to_timedelta(latest_date.dayofweek + 1, unit='d')
-
-def get_summary(df, department=None, use_complete_weeks=True):
+        return base_date - pd.to_timedelta(base_date.dayofweek + 1, unit='d')
+        
+def get_summary(df, analysis_base_date, department=None, use_complete_weeks=True):
     """
     週単位でのサマリーを計算する。
     """
@@ -26,8 +36,9 @@ def get_summary(df, department=None, use_complete_weeks=True):
         target_df = target_df[target_df['実施診療科'] == department]
 
     if use_complete_weeks:
-        latest_date = df['手術実施日_dt'].max()
-        analysis_end_date = get_analysis_end_date(latest_date)
+        # 修正箇所: latest_date を使うのをやめ、引数の analysis_base_date を使う
+        # latest_date = df['手術実施日_dt'].max()  <- この行を削除
+        analysis_end_date = get_analysis_end_date(analysis_base_date) # 引数で受け取った日付を使用
         if analysis_end_date:
             target_df = target_df[target_df['手術実施日_dt'] <= analysis_end_date]
     
@@ -60,13 +71,13 @@ def get_summary(df, department=None, use_complete_weeks=True):
 
 # analysis/weekly.py に追加する関数
 
-def get_weekly_trend_data(df: pd.DataFrame, latest_date: pd.Timestamp, weeks: int = 8) -> list:
+def get_weekly_trend_data(df: pd.DataFrame, analysis_base_date: pd.Timestamp, weeks: int = 8) -> list:
     """
     過去N週間の週別推移データを取得（全身麻酔手術件数）
     
     Args:
         df: 手術データ
-        latest_date: 最新日付
+        analysis_base_date: 最新日付
         weeks: 取得する週数（デフォルト8週）
     
     Returns:
@@ -81,7 +92,7 @@ def get_weekly_trend_data(df: pd.DataFrame, latest_date: pd.Timestamp, weeks: in
         df.dropna(subset=['手術実施日_dt'], inplace=True)
         
         # 分析終了日を取得
-        analysis_end_date = get_analysis_end_date(latest_date)
+        analysis_end_date = get_analysis_end_date(analysis_base_date)
         if not analysis_end_date:
             return []
         
