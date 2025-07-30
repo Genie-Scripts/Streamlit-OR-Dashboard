@@ -593,24 +593,19 @@ class SurgeryGitHubPublisher:
         </div>
     """
 
-    def _generate_hospital_summary_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any], recent_week_kpi: Dict[str, Any]) -> str:
+    def _generate_hospital_summary_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any], recent_week_kpi: Dict[str, Any], latest_date: datetime) -> str:
         """病院全体手術サマリタブ生成（デザイン統一版 + 週別推移チャート追加）"""
         try:
-            # 他のタブとデザインを統一した新しいHTMLを生成
             summary_html = self._generate_unified_hospital_summary_html(yearly_data, basic_kpi, recent_week_kpi)
             
-            # 月別トレンドチャート
             monthly_trend_chart = self._generate_monthly_trend_section(yearly_data)
             
-            # 週別トレンドチャートを追加
             if hasattr(self, 'df'):
-                # 【重要】引数で受け取った latest_date を使う
-                # 下の行を削除: latest_date = self.df['手術実施日_dt'].max() if '手術実施日_dt' in self.df.columns else pd.Timestamp.now()
+                # 引数で受け取った latest_date を使う
                 weekly_trend_data = self._get_weekly_trend_data(self.df, latest_date)
                 weekly_trend_chart = self._generate_weekly_trend_section(weekly_trend_data)
             else:
                 weekly_trend_chart = self._generate_fallback_weekly_chart()
-            # ▲▲▲ 変更箇所 ▲▲▲
             
             return f"""
             <div id="surgery-summary" class="view-content active">
@@ -619,6 +614,7 @@ class SurgeryGitHubPublisher:
                 {weekly_trend_chart}
             </div>
             """
+            
         except Exception as e:
             logger.error(f"病院サマリタブ生成エラー: {e}")
             return '<div id="surgery-summary" class="view-content active"><p>病院サマリデータを読み込み中...</p></div>'
