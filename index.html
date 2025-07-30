@@ -1,16 +1,1082 @@
-
-        <!DOCTYPE html>
-        <html lang="ja">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>エラー - 手術分析ダッシュボード</title>
-        </head>
-        <body style="font-family: sans-serif; padding: 20px; text-align: center;">
-            <h1>❌ ダッシュボード生成エラー</h1>
-            <p>統合ダッシュボードの生成中にエラーが発生しました。</p>
-            <p>エラー詳細: SurgeryGitHubPublisher._generate_hospital_summary_tab() takes 4 positional arguments but 5 were given</p>
-            <p>データと設定を確認してから再度お試しください。</p>
-        </body>
-        </html>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    </head>
+<body>
+    
+        <div class="header">
+            <h1>🏥 手術分析ダッシュボード</h1>
+            <div class="header-subtitle">診療科別パフォーマンス分析システム</div>
+            <button class="info-button" onclick="toggleInfoPanel()" title="評価基準・用語説明">
+                ℹ️ 説明
+            </button>
+        </div>
         
+        <!-- 情報パネルオーバーレイ -->
+        <div id="info-overlay" class="info-overlay" onclick="closeInfoPanel()"></div>
+        
+        <!-- 情報パネル -->
+        <div id="info-panel" class="info-panel">
+            <div class="info-panel-header">
+                <h2>📚 評価基準・用語説明</h2>
+                <button class="close-button" onclick="closeInfoPanel()">✕</button>
+            </div>
+            <div class="info-panel-content">
+                <div class="info-section">
+                    <h3>🏥 病院全体サマリ評価基準</h3>
+                    <p>「病院全体手術サマリ」タブの各カードの評価（優秀・良好・注意・要改善）は、以下の全身麻酔手術件数に基づいて決定されます。</p>
+                    
+                    <h4 style="margin-top: 16px; margin-bottom: 8px;">📅 直近週パフォーマンス</h4>
+                    <table class="score-table" style="width:100%;">
+                        <tbody>
+                            <tr><td style="width: 30%;">優秀 (Success)</td><td>100件以上</td></tr>
+                            <tr><td>良好 (Info)</td><td>80件以上 - 100件未満</td></tr>
+                            <tr><td>注意 (Warning)</td><td>70件以上 - 80件未満</td></tr>
+                            <tr><td>要改善 (Danger)</td><td>70件未満</td></tr>
+                        </tbody>
+                    </table>
+
+                    <h4 style="margin-top: 20px; margin-bottom: 8px;">📊 直近4週間パフォーマンス</h4>
+                    <table class="score-table" style="width:100%;">
+                        <tbody>
+                            <tr><td style="width: 30%;">優秀 (Success)</td><td>400件以上</td></tr>
+                            <tr><td>良好 (Info)</td><td>350件以上 - 400件未満</td></tr>
+                            <tr><td>注意 (Warning)</td><td>280件以上 - 350件未満</td></tr>
+                            <tr><td>要改善 (Danger)</td><td>280件未満</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="info-section">
+                    <h3>🎯 評価基準</h3>
+                </div>
+                
+                <div class="info-section score-calculation-section">
+                    <h3>🏆 ハイスコア計算方法（100点満点）</h3>
+                    <div class="score-explanation">
+                        <p class="score-intro">診療科ランキングの総合スコアは、以下の3つの指標から構成されています：</p>
+                        
+                        <div class="score-component">
+                            <h4>1. 🎯 全身麻酔手術件数（70点満点）- 最重要指標</h4>
+                            <div class="score-detail">
+                                <p>週単位の全身麻酔手術件数（麻酔時間20分以上）を多角的に評価します。</p>
+                                
+                                <div class="score-breakdown">
+                                    <h5>配点内訳：</h5>
+                                    <ul>
+                                        <li><strong>直近週達成度（30点）</strong>
+                                            <ul>
+                                                <li>CSV目標値に対する達成率で評価</li>
+                                                <li>達成率100%以上：30点</li>
+                                                <li>達成率90-99%：24点</li>
+                                                <li>達成率80-89%：18点</li>
+                                                <li>達成率70-79%：12点</li>
+                                                <li>達成率70%未満：0-6点</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>改善度（20点）</strong>
+                                            <ul>
+                                                <li>評価期間の平均と過去期間の平均を比較</li>
+                                                <li>改善率+20%以上：20点</li>
+                                                <li>改善率+10-19%：15点</li>
+                                                <li>改善率+5-9%：10点</li>
+                                                <li>改善率0-4%：5点</li>
+                                                <li>マイナス成長：0点</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>安定性（15点）</strong>
+                                            <ul>
+                                                <li>週次実績の変動係数で評価</li>
+                                                <li>変動係数10%未満：15点（非常に安定）</li>
+                                                <li>変動係数10-20%：12点（安定）</li>
+                                                <li>変動係数20-30%：8点（やや不安定）</li>
+                                                <li>変動係数30-40%：4点（不安定）</li>
+                                                <li>変動係数40%以上：0点（極めて不安定）</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>持続性（5点）</strong>
+                                            <ul>
+                                                <li>週次トレンドの傾きで評価</li>
+                                                <li>上昇トレンド：5点</li>
+                                                <li>横ばいトレンド：3点</li>
+                                                <li>下降トレンド：0点</li>
+                                            </ul>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="score-component">
+                            <h4>2. 📊 全手術件数（15点満点）</h4>
+                            <div class="score-detail">
+                                <p>診療科の全体的な手術活動量を評価します。</p>
+                                
+                                <div class="score-breakdown">
+                                    <h5>配点内訳：</h5>
+                                    <ul>
+                                        <li><strong>診療科間ランキング（10点）</strong>
+                                            <ul>
+                                                <li>1位：10点</li>
+                                                <li>2位：8点</li>
+                                                <li>3位：6点</li>
+                                                <li>4位：4点</li>
+                                                <li>5位：2点</li>
+                                                <li>6位以下：0点</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>改善度（5点）</strong>
+                                            <ul>
+                                                <li>前期比+10%以上：5点</li>
+                                                <li>前期比+5-9%：3点</li>
+                                                <li>前期比0-4%：1点</li>
+                                                <li>前期比マイナス：0点</li>
+                                            </ul>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="score-component">
+                            <h4>3. ⏱️ 総手術時間（15点満点）</h4>
+                            <div class="score-detail">
+                                <p>手術室の稼働効率と貢献度を評価します。</p>
+                                
+                                <div class="score-breakdown">
+                                    <h5>配点内訳：</h5>
+                                    <ul>
+                                        <li><strong>診療科間ランキング（10点）</strong>
+                                            <ul>
+                                                <li>1位：10点</li>
+                                                <li>2位：8点</li>
+                                                <li>3位：6点</li>
+                                                <li>4位：4点</li>
+                                                <li>5位：2点</li>
+                                                <li>6位以下：0点</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>改善度（5点）</strong>
+                                            <ul>
+                                                <li>前期比+10%以上：5点</li>
+                                                <li>前期比+5-9%：3点</li>
+                                                <li>前期比0-4%：1点</li>
+                                                <li>前期比マイナス：0点</li>
+                                            </ul>
+                                        </li>
+                                    </ul>
+                                </div>
+                                
+                                <div class="calculation-note">
+                                    <p><strong>⚠️ 手術時間の計算方法：</strong></p>
+                                    <ul>
+                                        <li>入室時刻から退室時刻までの経過時間</li>
+                                        <li>深夜跨ぎ対応（23:30入室→1:15退室 = 1時間45分）</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="total-score-summary">
+                            <h4>📊 総合スコア = 全身麻酔(70点) + 全手術(15点) + 手術時間(15点)</h4>
+                            <p class="score-note">※ 最高100点満点で評価</p>
+                            
+                            <div class="grade-system">
+                                <h5>グレード判定：</h5>
+                                <ul class="grade-list">
+                                    <li><span class="grade-badge grade-s">S</span> 90点以上（卓越したパフォーマンス）</li>
+                                    <li><span class="grade-badge grade-a">A</span> 80-89点（優秀なパフォーマンス）</li>
+                                    <li><span class="grade-badge grade-b">B</span> 70-79点（良好なパフォーマンス）</li>
+                                    <li><span class="grade-badge grade-c">C</span> 60-69点（標準的なパフォーマンス）</li>
+                                    <li><span class="grade-badge grade-d">D</span> 60点未満（改善が必要）</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+            <!-- 既存の用語説明・計算方法・活用のヒントセクション -->
+            <!-- 省略（変更なし） -->
+        </div>
+    </div>
+    
+    
+    <div class="container">
+        
+        <div class="view-selector">
+            <div class="view-tabs">
+                <div class="view-tab active" onclick="showView('surgery-summary')">
+                    🏥 病院全体手術サマリ
+                </div>
+                <div class="view-tab" onclick="showView('high-score')">
+                    🏆 ハイスコア TOP3
+                </div>
+                <div class="view-tab" onclick="showView('performance')">
+                    📊 診療科別パフォーマンス
+                </div>
+                <div class="view-tab" onclick="showView('analysis')">
+                    📈 詳細分析
+                </div>
+            </div>
+        </div>
+        
+        
+        
+            <div id="surgery-summary" class="view-content active">
+                
+        <div class="summary">
+            <h2>🏥 病院全体サマリー</h2>
+        </div>
+        <div class="grid-container">
+            
+        <div class="metric-card warning">
+            <div class="metric-title">📅 直近週パフォーマンス</div>
+            <div class="metric-row">
+                <span>全身麻酔手術件数</span>
+                <span class="metric-value-row">79 件</span>
+            </div>
+            <div class="metric-row">
+                <span>全手術件数</span>
+                <span class="metric-value-row">225 件</span>
+            </div>
+            <div class="metric-row">
+                <span>平日1日あたり全身麻酔手術</span>
+                <span class="metric-value-row">15.4 件</span>
+            </div>
+            <div class="achievement-row">
+                <span>評価</span>
+                <span>注意</span>
+            </div>
+        </div>
+        
+            
+        <div class="metric-card info">
+            <div class="metric-title">📊 直近4週間パフォーマンス</div>
+            <div class="metric-row">
+                <span>全身麻酔手術件数</span>
+                <span class="metric-value-row">362 件</span>
+            </div>
+            <div class="metric-row">
+                <span>全手術件数</span>
+                <span class="metric-value-row">1,074 件</span>
+            </div>
+            <div class="metric-row">
+                <span>平日1日あたり全身麻酔手術</span>
+                <span class="metric-value-row">17.9 件</span>
+            </div>
+            <div class="achievement-row">
+                <span>評価</span>
+                <span>良好</span>
+            </div>
+        </div>
+        
+            
+        <div class="metric-card success">
+            <div class="metric-title">📈 全身麻酔手術件数 年度比較</div>
+            <div class="metric-row">
+                <span>今年度累計 (2025/04/01 - 2025/07/27)</span>
+                <span class="metric-value-row">1,497 件</span>
+            </div>
+            <div class="metric-row">
+                <span>昨年度同期</span>
+                <span class="metric-value-row">1,340 件</span>
+            </div>
+            <div class="metric-row">
+                <span>年度末予測</span>
+                <span class="metric-value-row">4,586 件</span>
+            </div>
+            <div class="achievement-row">
+                <span>前年度同期比</span>
+                <span>+157 件 (+11.7%)</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: 100%;"></div>
+            </div>
+        </div>
+        
+            
+        <div class="metric-card danger">
+            <div class="metric-title">🏥 手術室稼働率 (直近4週)</div>
+            <div class="metric-row">
+                <span>現在の稼働率</span>
+                <span class="metric-value-row">64.3%</span>
+            </div>
+            
+            <div class="metric-row">
+                <span>前年度同期稼働率</span>
+                <span class="metric-value-row">60.6%</span>
+            </div>
+            
+            <div class="achievement-row">
+                <span>評価</span>
+                <span>改善余地あり</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: 64.3%;"></div>
+            </div>
+        </div>
+        
+        </div>
+    
+                
+            <div class="trend-chart">
+                <h3>📈 月別推移（全身麻酔手術件数 - 過去6ヶ月）</h3>
+                <div style="position: relative; height: 300px; margin: 20px 0;">
+                    <canvas id="monthlyTrendChart"></canvas>
+                </div>
+                <p style="text-align: center; color: #666; font-size: 12px;">
+                    実線：当月実績 | 点線：前年同月実績 | 破線：目標ライン（月420件）
+                </p>
+            </div>
+            
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+            <script>
+            (function() {
+                function initChart() {
+                    const ctx = document.getElementById('monthlyTrendChart');
+                    if (!ctx) {
+                        setTimeout(initChart, 100);
+                        return;
+                    }
+                    
+                    const chartData = {
+                        labels: ["25年2月", "25年3月", "25年4月", "25年5月", "25年6月", "25年7月 (26日時点)"],
+                        datasets: [
+                            {
+                                label: '当月実績',
+                                data: [358, 373, 373, 393, 384, 347],
+                                borderColor: 'rgb(102, 126, 234)',
+                                backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                borderWidth: 3,
+                                tension: 0.1,
+                                pointRadius: 5,
+                            },
+                            {
+                                label: '前年同月実績',
+                                data: [342, 345, 345, 338, 328, 329],
+                                borderColor: 'rgb(156, 163, 175)',
+                                backgroundColor: 'rgba(156, 163, 175, 0.1)',
+                                borderWidth: 2,
+                                borderDash: [5, 5],
+                                tension: 0.1,
+                                pointRadius: 4,
+                                spanGaps: true, // null値を線で繋がない
+                            },
+                            {
+                                label: '目標ライン',
+                                data: [420, 420, 420, 420, 420, 420],
+                                borderColor: 'rgb(255, 152, 0)',
+                                borderWidth: 2,
+                                borderDash: [10, 5],
+                                pointRadius: 0,
+                                fill: false
+                            }
+                        ]
+                    };
+                    
+                    const chartOptions = {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top',
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y + '件';
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                display: true,
+                                suggestedMin: 314,
+                                suggestedMax: 433,
+                                grid: {
+                                    color: 'rgba(0, 0, 0, 0.05)'
+                                },
+                                ticks: {
+                                    callback: function(value) {
+                                        return Math.round(value) + '件';
+                                    }
+                                }
+                            }
+                        },
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }
+                    };
+                    
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: chartData,
+                        options: chartOptions
+                    });
+                }
+                
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', initChart);
+                } else {
+                    setTimeout(initChart, 100);
+                }
+            })();
+            </script>
+            
+                
+            <div class="trend-chart">
+                <h3>📊 週別推移（全身麻酔手術件数 - 過去8週間）</h3>
+                <div style="position: relative; height: 300px; margin: 20px 0;">
+                    <canvas id="weeklyTrendChart"></canvas>
+                </div>
+                <p style="text-align: center; color: #666; font-size: 12px;">
+                    実線：当週実績 | 点線：前年同月週平均 | 破線：目標ライン（週95件）
+                </p>
+            </div>
+            
+            <script>
+            (function() {
+                function initWeeklyChart() {
+                    const ctx = document.getElementById('weeklyTrendChart');
+                    if (!ctx) {
+                        setTimeout(initWeeklyChart, 100);
+                        return;
+                    }
+                    
+                    const chartData = {
+                        labels: ["6/2-6/8", "6/9-6/15", "6/16-6/22", "6/23-6/29", "6/30-7/6", "7/7-7/13", "7/14-7/20", "7/21-7/27"],
+                        datasets: [
+                            {
+                                label: '当週実績',
+                                data: [95, 86, 95, 93, 94, 92, 97, 79],
+                                borderColor: 'rgb(34, 197, 94)',
+                                backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                borderWidth: 3,
+                                tension: 0.1,
+                                pointRadius: 5,
+                                pointBackgroundColor: 'rgb(34, 197, 94)',
+                            },
+                            {
+                                label: '前年同月週平均',
+                                data: [null, null, null, null, null, null, null, null],
+                                borderColor: 'rgb(156, 163, 175)',
+                                backgroundColor: 'rgba(156, 163, 175, 0.1)',
+                                borderWidth: 2,
+                                borderDash: [5, 5],
+                                tension: 0.1,
+                                pointRadius: 4,
+                                spanGaps: true,
+                                pointBackgroundColor: 'rgb(156, 163, 175)',
+                            },
+                            {
+                                label: '目標ライン',
+                                data: [95, 95, 95, 95, 95, 95, 95, 95],
+                                borderColor: 'rgb(239, 68, 68)',
+                                borderWidth: 2,
+                                borderDash: [10, 5],
+                                pointRadius: 0,
+                                fill: false
+                            }
+                        ]
+                    };
+                    
+                    const chartOptions = {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top',
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            label += context.parsed.y + '件';
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                display: true,
+                                suggestedMin: 76,
+                                suggestedMax: 99,
+                                grid: {
+                                    color: 'rgba(0, 0, 0, 0.05)'
+                                },
+                                ticks: {
+                                    callback: function(value) {
+                                        return Math.round(value) + '件';
+                                    }
+                                }
+                            }
+                        },
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }
+                    };
+                    
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: chartData,
+                        options: chartOptions
+                    });
+                }
+                
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', initWeeklyChart);
+                } else {
+                    setTimeout(initWeeklyChart, 100);
+                }
+            })();
+            </script>
+            
+            </div>
+            
+        
+            <div id="high-score" class="view-content">
+                <div class="stats-highlight">
+                    <h2>🏆 診療科ランキング TOP3</h2>
+                    <p>評価期間: 直近12週</p>
+                </div>
+                
+                <div class="ranking-section">
+                    
+                <div class="ranking-card rank-1">
+                    <div class="rank-header">
+                        <span class="medal">🥇</span>
+                        <span class="rank-label">診療科1位</span>
+                    </div>
+                    <div class="dept-name">皮膚科</div>
+                    <div class="score-info">
+                        <div class="achievement">達成率 166.7%</div>
+                        <div class="score-value">82点</div>
+                    </div>
+                </div>
+                
+                <div class="ranking-card rank-2">
+                    <div class="rank-header">
+                        <span class="medal">🥈</span>
+                        <span class="rank-label">診療科2位</span>
+                    </div>
+                    <div class="dept-name">歯科口腔外科</div>
+                    <div class="score-info">
+                        <div class="achievement">達成率 125.0%</div>
+                        <div class="score-value">72点</div>
+                    </div>
+                </div>
+                
+                <div class="ranking-card rank-3">
+                    <div class="rank-header">
+                        <span class="medal">🥉</span>
+                        <span class="rank-label">診療科3位</span>
+                    </div>
+                    <div class="dept-name">心臓血管外科</div>
+                    <div class="score-info">
+                        <div class="achievement">達成率 142.9%</div>
+                        <div class="score-value">75点</div>
+                    </div>
+                </div>
+                
+                </div>
+                
+                
+                <div class="summary">
+                    <h2>👑 診療科1位：皮膚科</h2>
+                    <div class="summary-stats">
+                        <div class="stat-item">
+                            <div class="stat-value">82点</div>
+                            <div class="stat-label">総合スコア</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">166.7%</div>
+                            <div class="stat-label">達成率</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">1位</div>
+                            <div class="stat-label">病院内順位</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="grid-container">
+                    <div class="metric-card success">
+                        <div class="metric-title">📊 対目標パフォーマンス</div>
+                        <div class="metric-row">
+                            <span>スコア</span>
+                            <span class="metric-value-row">45点</span>
+                        </div>
+                        <div class="achievement-row">
+                            <span>達成率</span>
+                            <span>166.7%</span>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card info">
+                        <div class="metric-title">📈 改善・継続性</div>
+                        <div class="metric-row">
+                            <span>スコア</span>
+                            <span class="metric-value-row">19点</span>
+                        </div>
+                        <div class="achievement-row">
+                            <span>安定性</span>
+                            <span>4点</span>
+                        </div>
+                    </div>
+                    
+                    <div class="metric-card warning">
+                        <div class="metric-title">🎯 相対競争力</div>
+                        <div class="metric-row">
+                            <span>スコア</span>
+                            <span class="metric-value-row">18点</span>
+                        </div>
+                        <div class="achievement-row">
+                            <span>改善度</span>
+                            <span>+100.0%</span>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+            
+        
+        
+            <div id="performance" class="view-content">
+                
+            <div class="summary">
+                <h2>📊 診療科別パフォーマンス概要</h2>
+                <div class="summary-stats">
+                    <div class="stat-item">
+                        <div class="stat-value">12</div>
+                        <div class="stat-label">診療科数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">4</div>
+                        <div class="stat-label">目標達成科数</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">96.6%</div>
+                        <div class="stat-label">平均達成率</div>
+                    </div>
+                </div>
+            </div>
+            
+                <div class="grid-container">
+                    
+                <div class="metric-card success">
+                    <div class="metric-title">皮膚科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">1.2 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">2 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">1.2 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>166.7%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 100%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card success">
+                    <div class="metric-title">心臓血管外科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">1.5 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">3 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">2.1 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>142.9%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 100%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card success">
+                    <div class="metric-title">形成外科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">3.5 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">4 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">3.0 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>133.3%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 100%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card success">
+                    <div class="metric-title">歯科口腔外科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">3.8 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">4 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">3.2 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>125.0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 100%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card info">
+                    <div class="metric-title">一般消化器外科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">13.8 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">13 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">14.1 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>92.2%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 92.2%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card warning">
+                    <div class="metric-title">産婦人科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">9.8 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">11 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">12.5 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>88.0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 88.0%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card warning">
+                    <div class="metric-title">整形外科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">26.2 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">22 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">27.2 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>80.9%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 80.9%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card danger">
+                    <div class="metric-title">乳腺外科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">6.5 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">6 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">8.1 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>74.1%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 74.1%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card danger">
+                    <div class="metric-title">呼吸器外科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">2.0 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">2 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">2.8 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>71.4%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 71.4%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card danger">
+                    <div class="metric-title">泌尿器科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">11.0 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">7 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">10.2 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>68.6%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 68.6%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card danger">
+                    <div class="metric-title">脳神経外科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">2.8 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">2 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">3.0 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>66.7%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 66.7%;"></div>
+                    </div>
+                </div>
+                
+                <div class="metric-card danger">
+                    <div class="metric-title">耳鼻咽喉科</div>
+                    <div class="metric-row">
+                        <span>4週平均</span>
+                        <span class="metric-value-row">6.8 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>直近週実績</span>
+                        <span class="metric-value-row">4 件</span>
+                    </div>
+                    <div class="metric-row">
+                        <span>週次目標</span>
+                        <span class="metric-value-row">8.1 件</span>
+                    </div>
+                    <div class="achievement-row">
+                        <span>達成率</span>
+                        <span>49.4%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 49.4%;"></div>
+                    </div>
+                </div>
+                
+                </div>
+            </div>
+            
+        
+        
+            <div id="analysis" class="view-content">
+                <div class="summary">
+                    <h2>📈 詳細分析・改善提案</h2>
+                </div>
+                
+                <div class="grid-container" style="grid-template-columns: 1fr;">
+                    
+            <div class="metric-card warning">
+                <div class="metric-title">📊 統合パフォーマンス指標</div>
+                <div class="metric-row">
+                    <span>年度成長率</span>
+                    <span class="metric-value-row">+11.7%</span>
+                </div>
+                <div class="metric-row">
+                    <span>手術室稼働率</span>
+                    <span class="metric-value-row">64.3%</span>
+                </div>
+                <div class="metric-row">
+                    <span>年度末予測</span>
+                    <span class="metric-value-row">4,586件</span>
+                </div>
+                <div class="achievement-row">
+                    <span>総合評価</span>
+                    <span>良好</span>
+                </div>
+            </div>
+            
+                </div>
+                
+                <div class="analysis-section">
+                    <h2>📊 年度目標達成分析</h2>
+                    <div class="analysis-grid">
+                        
+            <div class="analysis-card success">
+                <h3>✅ 年度目標達成状況</h3>
+                <ul>
+                    <li>前年度同期比+11.7%の順調な増加</li>
+                    <li>手術室稼働率64.3%は改善余地あり</li>
+                    <li>年度末予測4,586件は過去最高水準</li>
+                    <li>継続的な成長基調を維持</li>
+                </ul>
+            </div>
+            
+                        
+            <div class="analysis-card info">
+                <h3>🎯 目標達成施策</h3>
+                <ul>
+                    <li>手術室稼働率を85%以上に向上させる</li>
+                    <li>診療科間の手術枠最適化を実施する</li>
+                    <li>緊急手術体制の強化を検討する</li>
+                    <li>年度末目標：4,723件を目指す</li>
+                    <li>現在の成長ペースを維持する</li>
+                </ul>
+            </div>
+            
+                    </div>
+                </div>
+            </div>
+            
+    </div>
+    
+    
+        <script>
+            function showView(viewId) {
+                // すべてのタブとコンテンツを非アクティブ化
+                document.querySelectorAll('.view-tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                
+                document.querySelectorAll('.view-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                
+                // 選択されたタブとコンテンツをアクティブ化
+                event.target.classList.add('active');
+                document.getElementById(viewId).classList.add('active');
+            }
+            
+            // 情報パネルの表示/非表示
+            function toggleInfoPanel() {
+                const panel = document.getElementById('info-panel');
+                const overlay = document.getElementById('info-overlay');
+                
+                if (panel.style.display === 'block') {
+                    panel.style.display = 'none';
+                    overlay.style.display = 'none';
+                } else {
+                    panel.style.display = 'block';
+                    overlay.style.display = 'block';
+                }
+            }
+            
+            // オーバーレイクリックで閉じる
+            function closeInfoPanel() {
+                document.getElementById('info-panel').style.display = 'none';
+                document.getElementById('info-overlay').style.display = 'none';
+            }
+            
+            // ページ読み込み時の初期化
+            document.addEventListener('DOMContentLoaded', function() {
+                // デフォルトで病院全体手術サマリを表示
+                document.getElementById('surgery-summary').classList.add('active');
+            });
+        </script>
+        
+    
+        <div class="footer">
+            <div>生成日時: 2025年07月30日</div>
+            <div>手術分析ダッシュボード v2.0</div>
+        </div>
+        
+</body>
+</html>
