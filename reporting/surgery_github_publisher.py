@@ -119,7 +119,8 @@ class SurgeryGitHubPublisher:
                 high_score_data=high_score_data,
                 dept_performance=dept_performance,
                 period=period,
-                recent_week_kpi=recent_week_kpi
+                recent_week_kpi=recent_week_kpi,
+                latest_date=latest_date  # この行を追加
             )
             
         except Exception as e:
@@ -166,7 +167,8 @@ class SurgeryGitHubPublisher:
     
     def _generate_4tab_dashboard_html(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any],
                                     high_score_data: list, dept_performance: pd.DataFrame,
-                                    period: str, recent_week_kpi: Dict[str, Any]) -> str: # <<< 引数追加
+                                    period: str, recent_week_kpi: Dict[str, Any], 
+                                    latest_date: datetime) -> str: # <<< 引数に latest_date を追加
         """4タブダッシュボードHTML生成"""
         try:
             current_date = datetime.now().strftime('%Y年%m月%d日')
@@ -174,19 +176,14 @@ class SurgeryGitHubPublisher:
             return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏥 手術分析ダッシュボード</title>
-    <style>{self._get_integrated_dashboard_css()}</style>
-</head>
+    </head>
 <body>
     {self._generate_header_html()}
     
     <div class="container">
         {self._generate_tab_navigation_html()}
         
-        {self._generate_hospital_summary_tab(yearly_data, basic_kpi, recent_week_kpi)}
-        
+        {self._generate_hospital_summary_tab(yearly_data, basic_kpi, recent_week_kpi, latest_date)}
         {self._generate_high_score_tab(high_score_data, period)}
         
         {self._generate_department_performance_tab(dept_performance)}
@@ -198,7 +195,7 @@ class SurgeryGitHubPublisher:
     {self._generate_footer_html(current_date)}
 </body>
 </html>"""
-            
+
         except Exception as e:
             logger.error(f"4タブHTML生成エラー: {e}")
             return self._generate_error_html(str(e))
@@ -607,11 +604,13 @@ class SurgeryGitHubPublisher:
             
             # 週別トレンドチャートを追加
             if hasattr(self, 'df'):
-                latest_date = self.df['手術実施日_dt'].max() if '手術実施日_dt' in self.df.columns else pd.Timestamp.now()
+                # 【重要】引数で受け取った latest_date を使う
+                # 下の行を削除: latest_date = self.df['手術実施日_dt'].max() if '手術実施日_dt' in self.df.columns else pd.Timestamp.now()
                 weekly_trend_data = self._get_weekly_trend_data(self.df, latest_date)
                 weekly_trend_chart = self._generate_weekly_trend_section(weekly_trend_data)
             else:
                 weekly_trend_chart = self._generate_fallback_weekly_chart()
+            # ▲▲▲ 変更箇所 ▲▲▲
             
             return f"""
             <div id="surgery-summary" class="view-content active">
@@ -620,7 +619,6 @@ class SurgeryGitHubPublisher:
                 {weekly_trend_chart}
             </div>
             """
-            
         except Exception as e:
             logger.error(f"病院サマリタブ生成エラー: {e}")
             return '<div id="surgery-summary" class="view-content active"><p>病院サマリデータを読み込み中...</p></div>'
