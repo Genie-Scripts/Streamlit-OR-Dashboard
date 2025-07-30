@@ -1,4 +1,4 @@
-# reporting/surgery_github_publisher.py (分析基準日を反映させる修正版)
+# reporting/surgery_github_publisher.py (評価ロジック参照先・説明パネル修正版)
 
 import pandas as pd
 import logging
@@ -9,7 +9,6 @@ import base64
 import requests
 import json
 
-# <<< 修正点: SessionManagerをインポートして分析基準日を取得できるようにする >>>
 from ui.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -25,19 +24,14 @@ class SurgeryGitHubPublisher:
         self.branch = branch
         self.base_url = "https://api.github.com"
         
-    # <<< 修正点: メソッドの引数に analysis_base_date を追加 >>>
     def publish_surgery_dashboard(self, df: pd.DataFrame, target_dict: Dict[str, float], 
-                                  analysis_base_date: pd.Timestamp, # <<< 引数追加
+                                  analysis_base_date: pd.Timestamp,
                                   period: str = "直近12週", 
                                   report_type: str = "integrated_dashboard") -> Tuple[bool, str]:
         """手術分析ダッシュボードを公開（4タブ統合版）"""
         try:
             logger.info(f"🚀 統合手術分析ダッシュボード公開開始: 4タブ構成")
-            
-            # dfをインスタンス変数として保存
             self.df = df
-            
-            # <<< 修正点: HTMLコンテンツ生成メソッドに analysis_base_date を渡す >>>
             html_content = self._generate_integrated_html_content(df, target_dict, period, analysis_base_date)
             
             if not html_content:
@@ -46,9 +40,8 @@ class SurgeryGitHubPublisher:
             success, message = self._upload_to_github(html_content)
             
             if success:
-                logger.info("✅ 統合手術分析ダッシュボード公開完了")
                 public_url = self.get_public_url()
-                return True, f"統合ダッシュボードの公開が完了しました\n📍 URL: {public_url}\n🏥 病院全体手術サマリ（年度比較付き）\n🏆 ハイスコア TOP3\n📊 診療科別パフォーマンス\n📈 詳細分析"
+                return True, f"統合ダッシュボードの公開が完了しました\n📍 URL: {public_url}"
             else:
                 return False, f"公開に失敗しました: {message}"
                 
@@ -86,12 +79,10 @@ class SurgeryGitHubPublisher:
             logger.error(f"直近週KPI取得エラー: {e}")
             return {}
 
-    # <<< 修正点: メソッドの引数に analysis_base_date を追加 >>>
     def _generate_integrated_html_content(self, df: pd.DataFrame, target_dict: Dict[str, float], 
                                           period: str, analysis_base_date: pd.Timestamp) -> Optional[str]:
         """統合HTMLコンテンツを生成（4タブ構成）"""
         try:
-            # <<< 修正点: 各データ取得メソッドに analysis_base_date を渡す >>>
             basic_kpi = self._get_basic_kpi_data(df, analysis_base_date)
             yearly_data = self._get_yearly_comparison_data(df, analysis_base_date)
             high_score_data = self._get_high_score_data(df, target_dict, period)
@@ -99,18 +90,13 @@ class SurgeryGitHubPublisher:
             recent_week_kpi = self._get_recent_week_kpi_data(df, analysis_base_date)
             
             return self._generate_4tab_dashboard_html(
-                yearly_data=yearly_data,
-                basic_kpi=basic_kpi,
-                high_score_data=high_score_data,
-                dept_performance=dept_performance,
-                period=period,
-                recent_week_kpi=recent_week_kpi,
-                analysis_base_date=analysis_base_date # <<< HTML生成メソッドにも渡す
+                yearly_data=yearly_data, basic_kpi=basic_kpi, high_score_data=high_score_data,
+                dept_performance=dept_performance, period=period, recent_week_kpi=recent_week_kpi,
+                analysis_base_date=analysis_base_date
             )
-            
         except Exception as e:
             logger.error(f"統合HTMLコンテンツ生成エラー: {e}")
-            return self._generate_fallback_html(df, target_dict, period)
+            return self._generate_error_html(str(e))
     
     # <<< 修正点: 引数を latest_date から analysis_base_date に変更 >>>
     def _get_basic_kpi_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> Dict[str, Any]:
@@ -135,8 +121,9 @@ class SurgeryGitHubPublisher:
     def _get_high_score_data(self, df: pd.DataFrame, target_dict: Dict[str, float], period: str) -> list:
         """ハイスコアデータ取得"""
         try:
-            from analysis.weekly_surgery_ranking import calculate_weekly_surgery_ranking
-            return calculate_weekly_surgery_ranking(df, target_dict, period)
+            # <<< 修正点: 呼び出す評価ロジックを変更 >>>
+            from analysis.surgery_high_score import calculate_surgery_high_scores
+            return calculate_surgery_high_scores(df, target_dict, period)
         except Exception as e:
             logger.error(f"ハイスコアデータ取得エラー: {e}")
             return []
@@ -385,9 +372,69 @@ class SurgeryGitHubPublisher:
                         </div>
                     </div>
                 </div>
-                
-            <!-- 既存の用語説明・計算方法・活用のヒントセクション -->
-            <!-- 省略（変更なし） -->
+
+            <!-- 用語説明セクション -->
+            <div class="info-section">
+                <h3>📖 用語説明</h3>
+                <dl class="term-list">
+                    <dt>全身麻酔手術</dt>
+                    <dd>麻酔時間が20分以上の手術。病院の手術活動の主要指標として重要視されます。</dd>
+                    
+                    <dt>変動係数（CV）</dt>
+                    <dd>標準偏差を平均値で割った値。データのばらつきの程度を示し、値が小さいほど安定していることを意味します。</dd>
+                    
+                    <dt>週次トレンド</dt>
+                    <dd>週ごとの手術件数の推移を線形回帰で分析した傾向。正の傾きは成長、負の傾きは減少を示します。</dd>
+                    
+                    <dt>達成率</dt>
+                    <dd>実績値を目標値で割った百分率。100%以上が目標達成を意味します。</dd>
+                    
+                    <dt>改善度</dt>
+                    <dd>現在の期間の平均値と過去の期間の平均値を比較した成長率。プラスの値は改善を示します。</dd>
+                </dl>
+            </div>
+            
+            <!-- 計算方法セクション -->
+            <div class="info-section">
+                <h3>🧮 計算方法</h3>
+                <div class="formula-list">
+                    <div class="formula-item">
+                        <strong>達成率の計算</strong>
+                        <code>達成率 = (実績値 ÷ 目標値) × 100</code>
+                    </div>
+                    
+                    <div class="formula-item">
+                        <strong>改善度の計算</strong>
+                        <code>改善度 = ((現在期間平均 - 過去期間平均) ÷ 過去期間平均) × 100</code>
+                    </div>
+                    
+                    <div class="formula-item">
+                        <strong>変動係数の計算</strong>
+                        <code>変動係数 = (標準偏差 ÷ 平均値) × 100</code>
+                    </div>
+                    
+                    <div class="formula-item">
+                        <strong>手術時間の計算</strong>
+                        <code>手術時間 = 退室時刻 - 入室時刻（深夜跨ぎ対応）</code>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 活用のヒントセクション -->
+            <div class="info-section">
+                <h3>💡 活用のヒント</h3>
+                <ul class="tips-list">
+                    <li><strong>目標設定の重要性：</strong>適切な目標値設定が正確な評価の基礎となります。過去実績と将来計画を考慮して設定しましょう。</li>
+                    
+                    <li><strong>トレンド分析：</strong>単発の数値だけでなく、時系列での推移を見ることで、改善傾向や問題の早期発見が可能です。</li>
+                    
+                    <li><strong>診療科間比較：</strong>他診療科との比較により、自科の相対的な位置づけを把握し、ベストプラクティスを学ぶ機会となります。</li>
+                    
+                    <li><strong>安定性の重視：</strong>高い実績も重要ですが、安定した手術実施は病院運営の観点から極めて重要です。</li>
+                    
+                    <li><strong>定期的な確認：</strong>週次でダッシュボードを確認し、早期の問題発見と対策立案を心がけましょう。</li>
+                </ul>
+            </div>
         </div>
     </div>
     """
@@ -2622,22 +2669,14 @@ class SurgeryGitHubPublisher:
     def _upload_to_github(self, html_content: str) -> Tuple[bool, str]:
         """GitHubにHTMLファイルをアップロード"""
         try:
-            # <<< 修正点 >>>
-            # docs/index.html のみにアップロードする
             self._upload_file('docs/index.html', html_content, skip_ci=False)
-            
-            # <<< 修正点 >>>
-            # GitHub Actions用の設定ファイルを作成する処理は、
-            # 今回のシンプルな構成では不要なため削除します。
-            # self._ensure_github_pages_workflow(skip_ci=True)
-            
             return True, "手術分析ダッシュボードの公開が完了しました"
         except Exception as e:
             logger.error(f"GitHubアップロードエラー: {e}")
             return False, str(e)
-    
+
     def _upload_file(self, filepath: str, content: str, skip_ci: bool = False) -> Tuple[bool, str]:
-        """単一ファイルをGitHubにアップロード（CIスキップ機能付き）"""
+        """単一ファイルをGitHubにアップロード"""
         try:
             headers = {"Authorization": f"Bearer {self.github_token}", "Accept": "application/vnd.github.v3+json"}
             get_url = f"{self.base_url}/repos/{self.repo_owner}/{self.repo_name}/contents/{filepath}"
