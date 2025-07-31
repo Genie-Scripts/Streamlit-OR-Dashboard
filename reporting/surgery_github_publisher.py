@@ -1260,16 +1260,8 @@ class SurgeryGitHubPublisher:
             target_value = get_weekly_target_value()  # 95件
             target_line = [target_value] * len(labels)
             
-            # 前年同月週平均値データ
-            prev_year_values = [
-                float(item['prev_year_month_avg']) if item.get('prev_year_month_avg') is not None else None 
-                for item in weekly_data
-            ]
-    
             # Y軸の最大値・最小値をデータに合わせて動的に設定
-            all_plot_values = [v for v in values if v is not None] + \
-                            [v for v in prev_year_values if v is not None] + \
-                            [target_value]
+            all_plot_values = [v for v in values if v is not None] + [target_value]
             
             if not all_plot_values:
                 min_value, max_value = 0, 120
@@ -1287,7 +1279,7 @@ class SurgeryGitHubPublisher:
                     <canvas id="weeklyTrendChart"></canvas>
                 </div>
                 <p style="text-align: center; color: #666; font-size: 12px;">
-                    実線：当週実績 | 点線：前年同月週平均 | 破線：目標ライン（週{target_value}件）
+                    実線：当週実績 | 破線：目標ライン（週{target_value}件）
                 </p>
             </div>
             
@@ -1312,18 +1304,6 @@ class SurgeryGitHubPublisher:
                                 tension: 0.1,
                                 pointRadius: 5,
                                 pointBackgroundColor: 'rgb(34, 197, 94)',
-                            }},
-                            {{
-                                label: '前年同月週平均',
-                                data: {json.dumps(prev_year_values)},
-                                borderColor: 'rgb(156, 163, 175)',
-                                backgroundColor: 'rgba(156, 163, 175, 0.1)',
-                                borderWidth: 2,
-                                borderDash: [5, 5],
-                                tension: 0.1,
-                                pointRadius: 4,
-                                spanGaps: true,
-                                pointBackgroundColor: 'rgb(156, 163, 175)',
                             }},
                             {{
                                 label: '目標ライン',

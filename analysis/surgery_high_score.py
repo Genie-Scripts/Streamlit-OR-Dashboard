@@ -205,19 +205,76 @@ def _calculate_department_score(dept_data: pd.DataFrame, dept_name: str,
         
         total_score = sum(score_components.values())
         
+        # === 修正部分：詳細なスコア内訳を追加 ===
+        gas_score_details = _get_gas_surgery_score_details(
+            weekly_stats, achievement_rate, all_weekly_df
+        )
+        
         return {
-            'entity_name': dept_name, 'display_name': dept_name,
+            'entity_name': dept_name, 
+            'display_name': dept_name,
             'total_score': round(total_score, 1),
             'grade': _determine_grade(total_score),
             'achievement_rate': round(achievement_rate, 1),
             'improvement_rate': round(_calculate_improvement_rate(weekly_stats['weekly_gas_cases']), 1),
             'score_components': {k: round(v, 1) for k, v in score_components.items()},
+            # === 追加：HTMLで必要な情報 ===
+            'hospital_rank': dept_rankings.get('total_cases_rank', 1),  # 病院内順位
+            'target_performance': {
+                'total': round(gas_score_details['achievement_score'], 1)
+            },
+            'improvement_score': {
+                'total': round(gas_score_details['improvement_score'] + gas_score_details['stability_score'], 1),
+                'stability': round(gas_score_details['stability_score'], 1)
+            },
+            'competitive_score': round(score_components.get('total_cases_score', 0) + score_components.get('total_hours_score', 0), 1)
         }
         
     except Exception as e:
         logger.error(f"診療科 {dept_name} のスコア計算エラー: {e}")
         return None
 
+def _get_gas_surgery_score_details(dept_weekly_stats: pd.DataFrame, achievement_rate: float, 
+                                   all_weekly_df: pd.DataFrame) -> Dict[str, float]:
+    """全身麻酔手術件数スコアの詳細を取得"""
+    weekly_gas_cases = dept_weekly_stats['weekly_gas_cases']
+    
+    # 1. 直近週達成度 (25点)
+    if achievement_rate >= 100: achievement_score = 25.0
+    elif achievement_rate >= 90: achievement_score = 20.0
+    elif achievement_rate >= 80: achievement_score = 15.0
+    elif achievement_rate >= 70: achievement_score = 10.0
+    else: achievement_score = max(0, (achievement_rate / 70) * 5)
+
+    # 2. 改善度 (10点)
+    improvement_rate = _calculate_improvement_rate(weekly_gas_cases)
+    if improvement_rate >= 20: improvement_score = 10.0
+    elif improvement_rate >= 10: improvement_score = 8.0
+    elif improvement_rate >= 5: improvement_score = 6.0
+    elif improvement_rate >= 0: improvement_score = 4.0
+    else: improvement_score = 0.0
+
+    # 3. 安定性 (10点)
+    variation_coeff = weekly_gas_cases.std() / weekly_gas_cases.mean() if weekly_gas_cases.mean() > 0 else 1
+    if variation_coeff < 0.1: stability_score = 10.0
+    elif variation_coeff < 0.2: stability_score = 8.0
+    elif variation_coeff < 0.3: stability_score = 6.0
+    elif variation_coeff < 0.4: stability_score = 4.0
+    else: stability_score = 0.0
+
+    # 4. 持続性 (5点)
+    trend_score = _calculate_trend_score(weekly_gas_cases, 5)
+
+    # 5. 貢献度 (20点)
+    contribution_score = _calculate_contribution_score(dept_weekly_stats, all_weekly_df)
+    
+    return {
+        'achievement_score': achievement_score,
+        'improvement_score': improvement_score,
+        'stability_score': stability_score,
+        'trend_score': trend_score,
+        'contribution_score': contribution_score
+    }
 
 def _calculate_department_rankings(all_weekly_df: pd.DataFrame, dept_name: str) -> Dict[str, int]:
     """診療科間ランキングを計算"""
@@ -226,21 +283,38 @@ def _calculate_department_rankings(all_weekly_df: pd.DataFrame, dept_name: str) 
         latest_week_data = all_weekly_df[all_weekly_df['week_start'] == latest_week]
         
         dept_stats = latest_week_data.groupby('実施診療科').agg({
-            '手術実施日_dt': 'count', '手術時間_時間': 'sum'
-        }).rename(columns={'手術実施日_dt': 'total_cases', '手術時間_時間': 'total_hours'})
+            '手術実施日_dt': 'count', 
+            '手術時間_時間': 'sum'
+        }).rename(columns={
+            '手術実施日_dt': 'total_cases', 
+            '手術時間_時間': 'total_hours'
+        })
         
         if dept_name not in dept_stats.index:
             total_depts = len(dept_stats)
-            return {'total_cases_rank': total_depts + 1, 'total_hours_rank': total_depts + 1, 'total_departments': total_depts}
+            # 0位ではなく最下位を返す
+            return {
+                'total_cases_rank': total_depts, 
+                'total_hours_rank': total_depts, 
+                'total_departments': total_depts
+            }
 
         total_cases_rank = (dept_stats['total_cases'] > dept_stats.loc[dept_name, 'total_cases']).sum() + 1
         total_hours_rank = (dept_stats['total_hours'] > dept_stats.loc[dept_name, 'total_hours']).sum() + 1
         
-        return {'total_cases_rank': total_cases_rank, 'total_hours_rank': total_hours_rank, 'total_departments': len(dept_stats)}
+        return {
+            'total_cases_rank': int(total_cases_rank),  # intに変換
+            'total_hours_rank': int(total_hours_rank),  # intに変換
+            'total_departments': len(dept_stats)
+        }
     except Exception as e:
         logger.error(f"ランキング計算エラー ({dept_name}): {e}", exc_info=True)
-        return {'total_cases_rank': 1, 'total_hours_rank': 1, 'total_departments': 1}
-
+        # エラー時も1位（0位ではない）を返す
+        return {
+            'total_cases_rank': 1, 
+            'total_hours_rank': 1, 
+            'total_departments': 1
+        }
 
 def _calculate_score_components(weekly_stats: pd.DataFrame, target_gas_cases: float,
                                achievement_rate: float, rankings: Dict[str, int],

@@ -69,8 +69,6 @@ def get_summary(df, analysis_base_date, department=None, use_complete_weeks=True
 
     return summary.rename(columns={'week_start': '週'})[['週', '週合計件数', '平日件数', '実データ平日数', '平日1日平均件数']]
 
-# analysis/weekly.py に追加する関数
-
 def get_weekly_trend_data(df: pd.DataFrame, analysis_base_date: pd.Timestamp, weeks: int = 8) -> list:
     """
     過去N週間の週別推移データを取得（全身麻酔手術件数）
@@ -124,32 +122,15 @@ def get_weekly_trend_data(df: pd.DataFrame, analysis_base_date: pd.Timestamp, we
                 (gas_df['手術実施日_dt'] <= week_end)
             ]
             
-            # 前年同月の週平均値を計算
-            current_month = week_start.month
-            current_year = week_start.year
-            prev_year_month_df = gas_df[
-                (gas_df['手術実施日_dt'].dt.year == current_year - 1) &
-                (gas_df['手術実施日_dt'].dt.month == current_month)
-            ]
-            
-            # 前年同月の週平均を計算
-            if not prev_year_month_df.empty:
-                # 前年同月の週数を計算
-                prev_year_weeks = prev_year_month_df.groupby('week_start').size()
-                prev_year_avg = prev_year_weeks.mean() if len(prev_year_weeks) > 0 else 0
-            else:
-                prev_year_avg = 0
-            
             week_name = f"{week_start.month}/{week_start.day}-{week_end.month}/{week_end.day}"
             is_current_week = (week_end == analysis_end_date)
             
             result.append({
-                'week': f"{current_year}-W{week_start.isocalendar()[1]:02d}",
+                'week': f"{week_start.year}-W{week_start.isocalendar()[1]:02d}",
                 'week_name': week_name,
                 'week_start': week_start,
                 'week_end': week_end,
                 'count': int(len(week_gas_df)),
-                'prev_year_month_avg': float(prev_year_avg) if prev_year_avg > 0 else None,
                 'is_current_week': is_current_week
             })
         
@@ -160,7 +141,6 @@ def get_weekly_trend_data(df: pd.DataFrame, analysis_base_date: pd.Timestamp, we
         logger = logging.getLogger(__name__)
         logger.error(f"週別トレンドデータ取得エラー: {e}")
         return []
-
 
 def get_weekly_target_value() -> int:
     """週次目標値を取得"""
