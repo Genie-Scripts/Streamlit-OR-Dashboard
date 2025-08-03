@@ -1,0 +1,44 @@
+{
+  "last_saved": "2025-08-04T07:23:25.694626",
+  "data_rows": 30644,
+  "data_columns": [
+    "手術実施日",
+    "実施診療科",
+    "実施手術室",
+    "麻酔科関与",
+    "入外区分",
+    "申込区分",
+    "実施術者",
+    "麻酔種別",
+    "入室時刻",
+    "退室時刻",
+    "予定手術時間",
+    "予定手術時間(OR)",
+    "手術実施日_dt",
+    "is_gas_20min",
+    "is_weekday",
+    "fiscal_year",
+    "month_start",
+    "week_start"
+  ],
+  "file_size_mb": 3.03,
+  "data_source": "file_upload",
+  "app_version": "6.0",
+  "save_count": 1,
+  "date_range": {
+    "min_date": "2023-04-01T00:00:00",
+    "max_date": "2025-08-02T00:00:00",
+    "total_days": 855,
+    "unique_dates": 782
+  },
+  "statistics": {
+    "departments": 23,
+    "wards": 0,
+    "total_records": 30644,
+    "columns_count": 18
+  },
+  "upload_time": "2025-08-04T07:23:25.678622",
+  "base_file_name": "year.csv",
+  "update_files_count": 1,
+  "target_file_name": "目標.csv"
+}
