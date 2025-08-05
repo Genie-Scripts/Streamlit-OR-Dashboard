@@ -1,4 +1,5 @@
 .
+├── __pycache__
 ├── analysis
 │   ├── __init__.py
 │   ├── forecasting.py
@@ -21,7 +22,6 @@
 │   └── loader.py
 ├── docs
 │   └── index.html
-├── file_list.txt
 ├── filelist.txt
 ├── fonts
 │   ├── __init__.py
@@ -35,23 +35,26 @@
 │   ├── NotoSansJP-SemiBold.ttf
 │   ├── NotoSansJP-Thin.ttf
 │   └── NotoSansJP-VariableFont_wght.ttf
-├── packages.txt
 ├── plotting
 │   ├── __init__.py
 │   ├── generic_plots.py
 │   └── trend_plots.py
 ├── README.md
-├── README.txt
 ├── reporting
 │   ├── __init__.py
 │   ├── csv_exporter.py
 │   ├── pdf_exporter.py
 │   ├── surgery_github_publisher.py
 │   └── surgery_high_score_html.py
-├── request.txt
 ├── requirements_minimal.txt
 ├── requirements_v7.txt
 ├── requirements.txt
+├── saved_data
+│   ├── backup
+│   │   ├── main_data_backup_20250804_072348.pkl
+│   │   └── metadata_backup_20250804_072348.json
+│   ├── main_data.pkl
+│   └── metadata.json
 ├── ui
 │   ├── __init__.py
 │   ├── components
@@ -78,9 +81,6 @@
 │   ├── __init__.py
 │   ├── date_helpers.py
 │   └── pdf_generator.py
-├── コマンド.txt
-├── ランキング計算.xlsx
-├── 出力条件.savitem
-└── 設計.txt
+└── コマンド.txt
 
-12 directories, 72 files
+15 directories, 69 files

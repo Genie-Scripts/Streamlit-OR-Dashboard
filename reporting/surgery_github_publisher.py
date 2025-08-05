@@ -1,4 +1,4 @@
-# reporting/surgery_github_publisher.py (評価ロジック参照先・説明パネル修正版)
+# reporting/surgery_github_publisher.py (評価ロジック参照先・説明パネル・GA対応修正版)
 
 import pandas as pd
 import logging
@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Tuple
 import base64
 import requests
 import json
+import os
 
 from ui.session_manager import SessionManager
 
@@ -23,16 +24,56 @@ class SurgeryGitHubPublisher:
         self.repo_name = repo_name
         self.branch = branch
         self.base_url = "https://api.github.com"
-        
+
+    # ▼▼▼【修正箇所】google_analytics_id を引数に追加 ▼▼▼
+    def generate_dashboard_html_content(self, df: pd.DataFrame, target_dict: Dict[str, float], 
+                                        period: str, analysis_base_date: pd.Timestamp,
+                                        google_analytics_id: Optional[str] = None) -> Optional[str]:
+        """ダッシュボードのHTMLコンテンツを生成する"""
+        try:
+            logger.info("HTMLコンテンツの生成を開始")
+            self.df = df
+            # ▼▼▼【修正箇所】google_analytics_id を渡す ▼▼▼
+            html_content = self._generate_integrated_html_content(df, target_dict, period, analysis_base_date, google_analytics_id)
+            if html_content:
+                logger.info("HTMLコンテンツの生成が完了")
+            else:
+                logger.warning("HTMLコンテンツの生成に失敗")
+            return html_content
+        except Exception as e:
+            logger.error(f"HTMLコンテンツの生成エラー: {e}", exc_info=True)
+            return None
+
+    def save_html_locally(self, html_content: str, folder: str = "docs") -> Tuple[bool, str]:
+        """HTMLコンテンツをローカルファイルに保存する"""
+        try:
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+                logger.info(f"フォルダを作成しました: {folder}")
+
+            filepath = os.path.join(folder, "index.html")
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(html_content)
+
+            absolute_path = os.path.abspath(filepath)
+            logger.info(f"HTMLをローカルに保存しました: {absolute_path}")
+            return True, f"docs/index.html に保存しました"
+        except Exception as e:
+            logger.error(f"HTMLのローカル保存エラー: {e}", exc_info=True)
+            return False, f"ローカルへの保存に失敗しました: {e}"
+
+    # ▼▼▼【修正箇所】google_analytics_id を引数に追加 ▼▼▼
     def publish_surgery_dashboard(self, df: pd.DataFrame, target_dict: Dict[str, float], 
                                   analysis_base_date: pd.Timestamp,
                                   period: str = "直近12週", 
-                                  report_type: str = "integrated_dashboard") -> Tuple[bool, str]:
+                                  report_type: str = "integrated_dashboard",
+                                  google_analytics_id: Optional[str] = None) -> Tuple[bool, str]:
         """手術分析ダッシュボードを公開（4タブ統合版）"""
         try:
             logger.info(f"🚀 統合手術分析ダッシュボード公開開始: 4タブ構成")
             self.df = df
-            html_content = self._generate_integrated_html_content(df, target_dict, period, analysis_base_date)
+            # ▼▼▼【修正箇所】google_analytics_id を渡す ▼▼▼
+            html_content = self._generate_integrated_html_content(df, target_dict, period, analysis_base_date, google_analytics_id)
             
             if not html_content:
                 return False, "HTMLコンテンツの生成に失敗しました"
@@ -54,7 +95,6 @@ class SurgeryGitHubPublisher:
         try:
             from analysis.weekly import get_analysis_end_date
 
-            # <<< 修正点: 引数の analysis_base_date を使用 >>>
             analysis_end_date = get_analysis_end_date(analysis_base_date)
             if not analysis_end_date: return {}
             
@@ -79,8 +119,10 @@ class SurgeryGitHubPublisher:
             logger.error(f"直近週KPI取得エラー: {e}")
             return {}
 
+    # ▼▼▼【修正箇所】google_analytics_id を引数に追加 ▼▼▼
     def _generate_integrated_html_content(self, df: pd.DataFrame, target_dict: Dict[str, float], 
-                                          period: str, analysis_base_date: pd.Timestamp) -> Optional[str]:
+                                          period: str, analysis_base_date: pd.Timestamp,
+                                          google_analytics_id: Optional[str] = None) -> Optional[str]:
         """統合HTMLコンテンツを生成（4タブ構成）"""
         try:
             basic_kpi = self._get_basic_kpi_data(df, analysis_base_date)
@@ -89,16 +131,17 @@ class SurgeryGitHubPublisher:
             dept_performance = self._get_department_performance_data(df, target_dict, analysis_base_date)
             recent_week_kpi = self._get_recent_week_kpi_data(df, analysis_base_date)
             
+            # ▼▼▼【修正箇所】google_analytics_id を渡す ▼▼▼
             return self._generate_4tab_dashboard_html(
                 yearly_data=yearly_data, basic_kpi=basic_kpi, high_score_data=high_score_data,
                 dept_performance=dept_performance, period=period, recent_week_kpi=recent_week_kpi,
-                analysis_base_date=analysis_base_date
+                analysis_base_date=analysis_base_date,
+                google_analytics_id=google_analytics_id
             )
         except Exception as e:
             logger.error(f"統合HTMLコンテンツ生成エラー: {e}")
             return self._generate_error_html(str(e))
     
-    # <<< 修正点: 引数を latest_date から analysis_base_date に変更 >>>
     def _get_basic_kpi_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> Dict[str, Any]:
         """基本KPIデータ取得"""
         try:
@@ -108,7 +151,6 @@ class SurgeryGitHubPublisher:
             logger.error(f"基本KPI取得エラー: {e}")
             return {}
     
-    # <<< 修正点: 引数を latest_date から analysis_base_date に変更 >>>
     def _get_yearly_comparison_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> Dict[str, Any]:
         """年度比較データ取得"""
         try:
@@ -121,14 +163,12 @@ class SurgeryGitHubPublisher:
     def _get_high_score_data(self, df: pd.DataFrame, target_dict: Dict[str, float], period: str) -> list:
         """ハイスコアデータ取得"""
         try:
-            # <<< 修正点: 呼び出す評価ロジックを変更 >>>
             from analysis.surgery_high_score import calculate_surgery_high_scores
             return calculate_surgery_high_scores(df, target_dict, period)
         except Exception as e:
             logger.error(f"ハイスコアデータ取得エラー: {e}")
             return []
     
-    # <<< 修正点: 引数を latest_date から analysis_base_date に変更 >>>
     def _get_department_performance_data(self, df: pd.DataFrame, target_dict: Dict[str, float], 
                                          analysis_base_date: pd.Timestamp) -> pd.DataFrame:
         """診療科別パフォーマンスデータ取得"""
@@ -139,21 +179,35 @@ class SurgeryGitHubPublisher:
             logger.error(f"診療科別パフォーマンスデータ取得エラー: {e}")
             return pd.DataFrame()
     
-    # <<< 修正点: メソッドの引数に analysis_base_date を追加 >>>
+    # ▼▼▼【修正箇所】google_analytics_id を引数に追加し、HTMLに埋め込む ▼▼▼
     def _generate_4tab_dashboard_html(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any],
                                     high_score_data: list, dept_performance: pd.DataFrame,
                                     period: str, recent_week_kpi: Dict[str, Any],
-                                    analysis_base_date: pd.Timestamp) -> str:
+                                    analysis_base_date: pd.Timestamp,
+                                    google_analytics_id: Optional[str] = None) -> str:
         """4タブダッシュボードHTML生成"""
         try:
             current_date = datetime.now().strftime('%Y年%m月%d日')
             
+            # Google Analytics トラッキングコードの生成
+            ga_script_html = ""
+            if google_analytics_id:
+                ga_script_html = f"""
+    <script async src="https://www.googletagmanager.com/gtag/js?id={google_analytics_id}"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){{{{dataLayer.push(arguments);}}}}
+      gtag('js', new Date());
+      gtag('config', '{google_analytics_id}');
+    </script>"""
+
             return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🏥 手術分析ダッシュボード</title>
+    {ga_script_html}
     <style>{self._get_integrated_dashboard_css()}</style>
 </head>
 <body>
@@ -181,20 +235,19 @@ class SurgeryGitHubPublisher:
             return self._generate_error_html(str(e))
 
     def _generate_header_html(self) -> str:
-        """ヘッダーHTML生成（情報ボタン付き・正しいスコア配点版）"""
+        """ヘッダーHTML生成（ポータルボタン追加版）"""
         return """
         <div class="header">
+            <a href="../index.html" class="portal-home-button">🏠 ポータルTOPへ</a>
             <h1>🏥 手術分析ダッシュボード</h1>
             <div class="header-subtitle">診療科別パフォーマンス分析システム</div>
             <button class="info-button" onclick="toggleInfoPanel()" title="評価基準・用語説明">
                 ℹ️ 説明
             </button>
         </div>
-        
-        <!-- 情報パネルオーバーレイ -->
+
         <div id="info-overlay" class="info-overlay" onclick="closeInfoPanel()"></div>
         
-        <!-- 情報パネル -->
         <div id="info-panel" class="info-panel">
             <div class="info-panel-header">
                 <h2>📚 評価基準・用語説明</h2>
@@ -294,7 +347,7 @@ class SurgeryGitHubPublisher:
                         </div>
 
                         <div class="score-component">
-                            <h4>2. � 全手術件数（15点満点）</h4>
+                            <h4>2.  全手術件数（15点満点）</h4>
                             <div class="score-detail">
                                 <p>診療科の全体的な手術活動量を評価します。</p>
                                 
@@ -381,7 +434,6 @@ class SurgeryGitHubPublisher:
                     </div>
                 </div>
 
-            <!-- 用語説明セクション -->
             <div class="info-section">
                 <h3>📖 用語説明</h3>
                 <dl class="term-list">
@@ -402,7 +454,6 @@ class SurgeryGitHubPublisher:
                 </dl>
             </div>
             
-            <!-- 計算方法セクション -->
             <div class="info-section">
                 <h3>🧮 計算方法</h3>
                 <div class="formula-list">
@@ -428,7 +479,6 @@ class SurgeryGitHubPublisher:
                 </div>
             </div>
             
-            <!-- 活用のヒントセクション -->
             <div class="info-section">
                 <h3>💡 活用のヒント</h3>
                 <ul class="tips-list">
@@ -446,7 +496,6 @@ class SurgeryGitHubPublisher:
         </div>
     </div>
     """
-
 
     def _generate_tab_navigation_html(self) -> str:
         """タブナビゲーションHTML生成（統一デザイン版）"""
@@ -1530,7 +1579,35 @@ class SurgeryGitHubPublisher:
                 margin-bottom: 20px;
                 position: relative;
             }
+
+            /* === ポータルへ戻るボタン === */
+            .portal-home-button {
+                position: absolute;
+                top: 20px;
+                left: 20px;
+                background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+                color: white;
+                padding: 10px 20px;
+                border-radius: 25px;
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 14px;
+                transition: var(--transition);
+                border: 2px solid rgba(255, 255, 255, 0.2);
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                box-shadow: var(--shadow-sm);
+                z-index: 10;
+            }
             
+            .portal-home-button:hover {
+                background: linear-gradient(135deg, var(--primary-dark), var(--primary-color));
+                transform: translateY(-2px);
+                box-shadow: var(--shadow-lg);
+                border-color: rgba(255, 255, 255, 0.4);
+            }
+
             .header h1 {
                 font-size: 2.2em;
                 margin: 0 0 10px 0;
@@ -2077,7 +2154,19 @@ class SurgeryGitHubPublisher:
                 }
                 
                 .header {
-                    padding: 20px 16px;
+                    padding: 60px 16px 20px 16px;
+                }
+                
+                .portal-home-button {
+                    top: 15px;
+                    left: 15px;
+                    padding: 8px 16px;
+                    font-size: 12px;
+                }
+                
+                .info-button {
+                    top: 15px;
+                    right: 15px;
                 }
                 
                 .header h1 {
@@ -2130,8 +2219,19 @@ class SurgeryGitHubPublisher:
                     padding: 20px;
                 }
             }
-            
+
             @media (max-width: 480px) {
+                .header {
+                    padding-top: 70px;
+                }
+                
+                .portal-home-button {
+                    top: 10px;
+                    left: 10px;
+                    padding: 6px 12px;
+                    font-size: 11px;
+                }
+
                 .header h1 {
                     font-size: 1.5em;
                 }
@@ -2740,136 +2840,104 @@ jobs:
 def create_surgery_github_publisher_interface():
     """手術分析GitHub公開インターフェース（4タブ手術分析ダッシュボード版）"""
     try:
-        # データ確認
         df = st.session_state.get('processed_df', pd.DataFrame())
         target_dict = st.session_state.get('target_dict', {})
-        
+
         if df.empty or not target_dict:
             st.sidebar.info("📊 データ読み込み後に手術分析ダッシュボード公開が利用可能になります")
             return
-        
+
         st.sidebar.markdown("---")
         st.sidebar.header("🚀 手術分析ダッシュボード公開")
-        
-        # 保存された設定を読み込み
-        saved_settings = load_github_settings()
-        
-        # GitHub設定
-        st.sidebar.markdown("**🔧 GitHub設定**")
-        
-        github_token = st.sidebar.text_input(
-            "GitHub Token",
-            type="password",
-            help="GitHubのPersonal Access Token (repo権限が必要)",
-            key="surgery_github_token"
-        )
-        
-        repo_owner = st.sidebar.text_input(
-            "リポジトリオーナー",
-            value=saved_settings.get('repo_owner', 'Genie-Scripts'),
-            help="GitHubユーザー名または組織名",
-            key="surgery_repo_owner"
-        )
-        
-        repo_name = st.sidebar.text_input(
-            "リポジトリ名",
-            value=saved_settings.get('repo_name', 'Streamlit-OR-Dashboard'),
-            help="公開用リポジトリ名",
-            key="surgery_repo_name"
-        )
-        
-        branch = st.sidebar.selectbox(
-            "ブランチ",
-            ["main", "master", "gh-pages"],
-            index=0,
-            key="surgery_branch"
-        )
-        
-        # 公開設定
-        st.sidebar.markdown("**⚙️ 公開設定**")
-        
-        period = st.sidebar.selectbox(
-            "評価期間",
-            ["直近4週", "直近8週", "直近12週"],
-            index=2,
-            key="surgery_publish_period"
-        )
-        
-        # 接続テスト
-        if st.sidebar.button("🔌 接続テスト", key="test_connection"):
-            if github_token and repo_owner and repo_name:
-                success, message = test_github_connection(github_token, repo_owner, repo_name)
-                if success:
-                    st.sidebar.success(f"✅ {message}")
-                    save_github_settings(repo_owner, repo_name, branch)
-                else:
-                    st.sidebar.error(f"❌ {message}")
-            else:
-                st.sidebar.error("すべての項目を入力してください")
-        
-        # 公開実行
-        st.sidebar.markdown("**📤 手術分析ダッシュボード公開**")
-        st.sidebar.info("🏥 病院全体手術サマリ（年度比較付き）\n🏆 ハイスコア TOP3\n📊 診療科別パフォーマンス\n📈 詳細分析")
-        
-        if st.sidebar.button("🚀 手術分析ダッシュボード公開", type="primary", key="surgery_publish_btn"):
-            if not github_token:
-                st.sidebar.error("GitHub Tokenが必要です")
-            elif not repo_owner or not repo_name:
-                st.sidebar.error("リポジトリ情報を入力してください")
-            else:
-                with st.spinner("手術手術ダッシュボードを公開中..."):
-                    publisher = SurgeryGitHubPublisher(
-                        github_token, repo_owner, repo_name, branch
-                    )
-                    
-                    # <<< 修正点: SessionManager から分析基準日を取得 >>>
-                    analysis_base_date = SessionManager.get_analysis_base_date()
-                    if analysis_base_date is None:
-                        # フォールバックとしてデータの最新日を使用
-                        analysis_base_date = df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns and not df.empty else datetime.now()
 
-                    # <<< 修正点: publisherのメソッドに analysis_base_date を渡す >>>
-                    success, message = publisher.publish_surgery_dashboard(
-                        df,
-                        target_dict,
-                        analysis_base_date, # <<< 追加した引数
-                        period,
-                        "integrated_dashboard"
-                    )
-                    
+        saved_settings = load_github_settings()
+
+        with st.sidebar.expander("🔧 GitHub設定", expanded=False):
+            github_token = st.text_input("GitHub Token", type="password", help="GitHubのPersonal Access Token (repo権限が必要)", key="surgery_github_token")
+            repo_owner = st.text_input("リポジトリオーナー", value=saved_settings.get('repo_owner', 'Genie-Scripts'), help="GitHubユーザー名または組織名", key="surgery_repo_owner")
+            repo_name = st.text_input("リポジトリ名", value=saved_settings.get('repo_name', 'Streamlit-OR-Dashboard'), help="公開用リポジトリ名", key="surgery_repo_name")
+            branch = st.selectbox("ブランチ", ["main", "master", "gh-pages"], index=0, key="surgery_branch")
+            if st.button("🔌 接続テスト", key="test_connection"):
+                if github_token and repo_owner and repo_name:
+                    success, message = test_github_connection(github_token, repo_owner, repo_name)
                     if success:
-                        st.sidebar.success(f"✅ {message}")
-                        
-                        # 設定を保存
+                        st.success(f"✅ {message}")
                         save_github_settings(repo_owner, repo_name, branch)
                     else:
-                        st.sidebar.error(f"❌ {message}")
+                        st.error(f"❌ {message}")
+                else:
+                    st.warning("すべての項目を入力してください")
+
+        st.sidebar.markdown("**⚙️ 公開設定**")
+        period = st.sidebar.selectbox("評価期間", ["直近4週", "直近8週", "直近12週"], index=2, key="surgery_publish_period")
         
-        # ヘルプ情報
+        # ★★ Google Analytics IDの入力欄を追加 ★★
+        google_analytics_id = st.sidebar.text_input(
+            "Google Analytics ID (任意)",
+            key="surgery_ga_id",
+            help="例: G-K6XTL1DM13"
+        )
+
+        publisher = SurgeryGitHubPublisher(github_token, repo_owner, repo_name, branch)
+
+        def _generate_html():
+            analysis_base_date = SessionManager.get_analysis_base_date()
+            if analysis_base_date is None:
+                analysis_base_date = df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns and not df.empty else datetime.now()
+
+            # ★★ GA_IDを渡す ★★
+            return publisher.generate_dashboard_html_content(df, target_dict, period, analysis_base_date, google_analytics_id)
+
+        st.sidebar.markdown("**📤 公開アクション**")
+
+        if st.sidebar.button("💾 ローカル保存のみ", key="local_save_button"):
+            with st.spinner("HTMLを生成して保存中..."):
+                html_content = _generate_html()
+                if html_content:
+                    save_success, save_message = publisher.save_html_locally(html_content)
+                    if save_success: st.sidebar.success(f"✅ {save_message}")
+                    else: st.sidebar.error(f"❌ {save_message}")
+                else:
+                    st.sidebar.error("❌ HTMLの生成に失敗しました。")
+
+        save_on_publish = st.sidebar.checkbox("公開時にローカルにも保存する", value=True)
+
+        if st.sidebar.button("🚀 GitHubに公開", type="primary", key="publish_button"):
+            if not github_token or not repo_owner or not repo_name:
+                st.sidebar.error("GitHub設定の全項目を入力してください。")
+            else:
+                with st.spinner("ダッシュボードを生成・公開中..."):
+                    html_content = _generate_html()
+                    if not html_content:
+                        st.sidebar.error("❌ HTMLの生成に失敗しました。")
+                    else:
+                        # ★★ GA_IDを渡す ★★
+                        success, message = publisher.publish_surgery_dashboard(df, target_dict, SessionManager.get_analysis_base_date() or datetime.now(), period, google_analytics_id=google_analytics_id)
+
+                        if success:
+                            st.sidebar.success(f"✅ {message}")
+                            save_github_settings(repo_owner, repo_name, branch)
+
+                            if save_on_publish:
+                                save_success, save_message = publisher.save_html_locally(html_content)
+                                if save_success: st.sidebar.info(f"ℹ️ {save_message}")
+                                else: st.sidebar.warning(f"⚠️ ローカル保存に失敗: {save_message}")
+                        else:
+                            st.sidebar.error(f"❌ 公開失敗: {message}")
+
         with st.sidebar.expander("📚 使い方"):
             st.markdown("""
-            **📋 事前準備:**
-            1. GitHubでリポジトリ作成
-            2. Settings > Pages > Source: GitHub Actions
-            3. Personal Access Token作成（repo権限）
-            
-            **🏥 手術分析ダッシュボード:**
-            - 病院全体手術サマリ（年度比較機能付き）
-            - ハイスコア TOP3 診療科ランキング
-            - 診療科別パフォーマンス一覧
-            - 詳細分析・改善提案
-            
-            **📱 公開後:**
-            - 自動的にGitHub Pagesで公開
-            - スマートフォン対応
-            - リアルタイム更新可能
-            - 4つのタブで切り替え表示
-            """)
-    
-    except Exception as e:
-        logger.error(f"手術GitHub公開インターフェースエラー: {e}")
-        st.sidebar.error("GitHub公開機能でエラーが発生しました")
+            **💾 ローカル保存のみ:**
+            生成された `index.html` をこのアプリの `docs` フォルダに保存します。
 
+            **🚀 GitHubに公開:**
+            `index.html` を指定されたGitHubリポジトリにアップロードし、Webページとして公開します。
+            - **「公開時にローカルにも保存する」** にチェックを入れると、公開と同時にローカルにもファイルが保存されます。
+            """)
+
+    except Exception as e:
+        logger.error(f"手術GitHub公開インターフェースエラー: {e}", exc_info=True)
+        st.sidebar.error("GitHub公開機能でエラーが発生しました")
 
 # === 既存関数（変更なし） ===
 
