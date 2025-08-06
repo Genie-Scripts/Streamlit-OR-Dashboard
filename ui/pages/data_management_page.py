@@ -1,7 +1,7 @@
 # ui/pages/data_management_page.py
 """
-データ管理ページモジュール
-データの読み込み、保存、バックアップ管理を行う
+データ管理ページモジュール（CSV出力機能統合版）
+データの読み込み、保存、バックアップ管理、メトリクス出力を行う
 """
 
 import streamlit as st
@@ -18,11 +18,19 @@ from data_persistence import (
     load_data_from_file, save_data_to_file, delete_saved_data
 )
 
+# メトリクス出力機能をインポート
+try:
+    from reporting.surgery_metrics_exporter import create_surgery_metrics_export_interface
+    METRICS_EXPORT_AVAILABLE = True
+except ImportError:
+    METRICS_EXPORT_AVAILABLE = False
+    logger.warning("メトリクス出力機能が利用できません")
+
 logger = logging.getLogger(__name__)
 
 
 class DataManagementPage:
-    """データ管理ページクラス"""
+    """データ管理ページクラス（CSV出力機能統合版）"""
     
     @staticmethod
     @safe_streamlit_operation("データ管理ページ描画")
@@ -34,13 +42,22 @@ class DataManagementPage:
         data_info = get_data_info()
         file_sizes = get_file_sizes()
         
-        # タブで機能を分割
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "データ状態", 
-            "バックアップ管理", 
-            "データエクスポート/インポート", 
-            "詳細設定"
-        ])
+        # タブで機能を分割（メトリクス出力タブを追加）
+        if METRICS_EXPORT_AVAILABLE:
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "📊 データ状態", 
+                "💾 バックアップ管理", 
+                "📁 エクスポート/インポート",
+                "📋 メトリクス出力",  # 新規追加
+                "⚙️ 詳細設定"
+            ])
+        else:
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📊 データ状態", 
+                "💾 バックアップ管理", 
+                "📁 エクスポート/インポート", 
+                "⚙️ 詳細設定"
+            ])
         
         with tab1:
             DataManagementPage._render_data_status_tab(data_info, file_sizes)
@@ -51,8 +68,15 @@ class DataManagementPage:
         with tab3:
             DataManagementPage._render_export_import_tab()
         
-        with tab4:
-            DataManagementPage._render_settings_tab()
+        if METRICS_EXPORT_AVAILABLE:
+            with tab4:
+                DataManagementPage._render_metrics_export_tab()
+            
+            with tab5:
+                DataManagementPage._render_settings_tab()
+        else:
+            with tab4:
+                DataManagementPage._render_settings_tab()
     
     @staticmethod
     def _render_data_status_tab(data_info: dict, file_sizes: dict) -> None:
@@ -84,137 +108,147 @@ class DataManagementPage:
                     try:
                         df, target_data, metadata = load_data_from_file()
                         
-                        if df is not None and not df.empty:
+                        if df is not None:
                             # セッションに保存
                             SessionManager.set_processed_df(df)
-                            SessionManager.set_target_dict(target_data or {})
-                            SessionManager.set_data_source('manual_load')
+                            if target_data:
+                                SessionManager.set_target_dict(target_data)
                             
-                            if '手術実施日_dt' in df.columns:
-                                SessionManager.set_latest_date(df['手術実施日_dt'].max())
-                            
-                            st.success(f"✅ データを読み込みました ({len(df):,}件)")
-                            logger.info(f"手動データ読み込み完了: {len(df)}件")
+                            st.success(f"✅ データを読み込みました: {len(df)}件")
                             st.rerun()
                         else:
                             st.error("❌ データ読み込みに失敗しました")
-                            
                     except Exception as e:
                         st.error(f"❌ 読み込みエラー: {e}")
-                        logger.error(f"データ読み込みエラー: {e}")
+            
+            # データ削除ボタン
+            if st.button("🗑️ 保存データを削除", type="secondary"):
+                if st.checkbox("確認: 保存データを削除します"):
+                    try:
+                        delete_success = delete_saved_data()
+                        if delete_success:
+                            st.success("✅ 保存データを削除しました")
+                            st.rerun()
+                        else:
+                            st.error("❌ データ削除に失敗しました")
+                    except Exception as e:
+                        st.error(f"❌ 削除エラー: {e}")
         else:
-            st.info("💿 保存データなし")
-            st.write("データアップロードページで新規データを処理してください。")
+            st.info("💾 保存データなし")
+            st.caption("データアップロードページでデータを読み込んでください")
     
     @staticmethod
     def _render_session_data_section(file_sizes: dict) -> None:
         """セッションデータセクションを描画"""
-        # ファイルサイズ情報
-        if file_sizes:
-            st.subheader("📁 ファイルサイズ")
-            for name, size in file_sizes.items():
-                st.write(f"• {name}: {size}")
-        
-        # 現在のセッションデータの状態
-        st.subheader("🖥️ セッション状態")
+        st.write("**📱 セッションデータ**")
         
         if SessionManager.is_data_loaded():
             df = SessionManager.get_processed_df()
-            data_info = SessionManager.get_data_info()
-            
-            st.write(f"• レコード数: {data_info['record_count']:,}")
-            st.write(f"• データソース: {data_info['data_source']}")
-            
-            if data_info['latest_date']:
-                st.write(f"• 最新日付: {data_info['latest_date']}")
-            
-            # 現在のデータを保存
-            if st.button("💾 現在のデータを保存"):
-                DataManagementPage._save_current_session_data()
-        else:
-            st.info("セッションにデータがありません")
-    
-    @staticmethod
-    @safe_file_operation("セッションデータ保存")
-    def _save_current_session_data() -> None:
-        """現在のセッションデータを保存"""
-        try:
-            df = SessionManager.get_processed_df()
             target_dict = SessionManager.get_target_dict()
             
-            metadata = {
-                'manual_save_time': datetime.now().isoformat(),
-                'save_source': 'manual',
-                'record_count': len(df)
-            }
+            st.success("✅ セッションにデータあり")
             
-            save_success = save_data_to_file(df, target_dict, metadata)
+            # データ統計
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("手術件数", f"{len(df):,}件")
+                if '実施診療科' in df.columns:
+                    st.metric("診療科数", f"{df['実施診療科'].nunique()}科")
             
-            if save_success:
-                st.success("✅ データを保存しました")
-                logger.info("手動データ保存完了")
-            else:
-                st.error("❌ 保存に失敗しました")
-                
-        except Exception as e:
-            st.error(f"❌ 保存エラー: {e}")
-            logger.error(f"データ保存エラー: {e}")
+            with col2:
+                st.metric("目標設定", f"{len(target_dict)}科" if target_dict else "未設定")
+                if '手術実施日_dt' in df.columns and not df.empty:
+                    date_range = (df['手術実施日_dt'].max() - df['手術実施日_dt'].min()).days + 1
+                    st.metric("データ期間", f"{date_range}日間")
+            
+            # セッションデータ保存
+            if st.button("💾 セッションデータを保存"):
+                with st.spinner("データ保存中..."):
+                    try:
+                        metadata = {
+                            "save_source": "session",
+                            "user_action": "manual_save",
+                            "data_version": "2.0"
+                        }
+                        
+                        save_success = save_data_to_file(df, target_dict, metadata)
+                        if save_success:
+                            st.success("✅ セッションデータを保存しました")
+                        else:
+                            st.error("❌ データ保存に失敗しました")
+                    except Exception as e:
+                        st.error(f"❌ 保存エラー: {e}")
+        else:
+            st.warning("⚠️ セッションにデータなし")
+            st.caption("データアップロードページでデータを読み込んでください")
+        
+        # ファイルサイズ情報
+        if file_sizes:
+            with st.expander("📁 ファイルサイズ情報"):
+                for file_type, size in file_sizes.items():
+                    st.write(f"• {file_type}: {size}")
     
     @staticmethod
     def _render_backup_management_tab() -> None:
         """バックアップ管理タブを描画"""
-        st.subheader("🔄 バックアップ管理")
+        st.subheader("💾 バックアップ管理")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            DataManagementPage._render_backup_list_section()
+        
+        with col2:
+            DataManagementPage._render_manual_backup_section()
+    
+    @staticmethod
+    @safe_file_operation("バックアップ一覧表示")
+    def _render_backup_list_section() -> None:
+        """バックアップ一覧セクションを描画"""
+        st.write("**📋 バックアップ一覧**")
         
         backup_info = get_backup_info()
         
         if backup_info:
-            st.write(f"📂 {len(backup_info)}個のバックアップファイル")
-            
-            # バックアップファイル一覧
-            for i, backup in enumerate(backup_info):
-                DataManagementPage._render_backup_item(backup, i)
+            for backup in backup_info:
+                with st.container():
+                    # 修正箇所1: .get()を使用して安全にキーにアクセス
+                    st.write(f"**{backup.get('filename', '不明なファイル')}**")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        # 修正箇所2: 'created_at'キーが存在しない場合、「不明」と表示
+                        st.caption(f"作成日時: {backup.get('created_at', '不明')}")
+                    
+                    with col2:
+                        # 修正箇所3: 'size'キーも同様に安全にアクセス
+                        st.caption(f"サイズ: {backup.get('size', '不明')}")
+                    
+                    with col3:
+                        # 復元ボタンのキーも安全な値を使用
+                        filename = backup.get('filename')
+                        if filename and st.button("🔄 復元", key=f"restore_{filename}"):
+                            DataManagementPage._restore_backup(backup)
+                    
+                    # ダウンロードボタン
+                    if backup.get('filename'):
+                        DataManagementPage._download_backup(backup)
+                    
+                    st.markdown("---")
         else:
-            st.info("📭 バックアップファイルがありません")
-        
-        # 手動バックアップ作成
-        DataManagementPage._render_manual_backup_section()
-    
-    @staticmethod
-    @safe_file_operation("バックアップアイテム表示")
-    def _render_backup_item(backup: dict, index: int) -> None:
-        """個別バックアップアイテムを描画"""
-        with st.expander(f"📄 {backup['timestamp']} ({backup['size']})"):
-            col1, col2, col3 = st.columns([2, 1, 1])
-            
-            with col1:
-                st.write(f"**ファイル名**: {backup['filename']}")
-                st.write(f"**サイズ**: {backup['size']}")
-                st.write(f"**作成日**: {backup['timestamp']}")
-                st.write(f"**経過日数**: {backup['age_days']}日")
-                
-                if backup['has_metadata']:
-                    st.write("✅ メタデータあり")
-            
-            with col2:
-                if st.button("🔄 復元", key=f"restore_{index}"):
-                    DataManagementPage._restore_backup(backup['filename'])
-            
-            with col3:
-                if st.button("📥 ダウンロード", key=f"download_{index}"):
-                    DataManagementPage._download_backup(backup)
+            st.info("📝 バックアップファイルがありません")
     
     @staticmethod
     @safe_file_operation("バックアップ復元")
-    def _restore_backup(filename: str) -> None:
+    def _restore_backup(backup: dict) -> None:
         """バックアップを復元"""
         try:
-            with st.spinner("バックアップ復元中..."):
-                success, message = restore_from_backup(filename)
+            with st.spinner(f"{backup['filename']} を復元中..."):
+                success, message = restore_from_backup(backup['filename'])
                 
                 if success:
                     st.success(f"✅ {message}")
-                    SessionManager.set_data_source('restored')
-                    logger.info(f"バックアップ復元完了: {filename}")
                     st.rerun()
                 else:
                     st.error(f"❌ {message}")
@@ -241,7 +275,7 @@ class DataManagementPage:
     @staticmethod
     def _render_manual_backup_section() -> None:
         """手動バックアップセクションを描画"""
-        st.subheader("📦 手動バックアップ作成")
+        st.write("**📦 手動バックアップ作成**")
         
         st.info("現在のデータをバックアップファイルとして保存します。")
         
@@ -293,21 +327,19 @@ class DataManagementPage:
                     if success:
                         st.success("✅ エクスポート完了")
                         
-                        # ダウンロードボタンを表示
+                        # ダウンロードボタン
                         with open(result, 'rb') as f:
                             st.download_button(
                                 label="💾 エクスポートファイルをダウンロード",
                                 data=f.read(),
-                                file_name=result,
+                                file_name=result.split('/')[-1],
                                 mime="application/zip"
                             )
-                        logger.info(f"データエクスポート完了: {result}")
                     else:
                         st.error(f"❌ エクスポート失敗: {result}")
                         
                 except Exception as e:
                     st.error(f"❌ エクスポートエラー: {e}")
-                    logger.error(f"データエクスポートエラー: {e}")
     
     @staticmethod
     @safe_file_operation("データインポート")
@@ -315,122 +347,133 @@ class DataManagementPage:
         """インポートセクションを描画"""
         st.subheader("📥 データインポート")
         
-        st.warning("⚠️ インポートすると現在のデータが上書きされます。事前にバックアップを作成することをお勧めします。")
+        st.info("エクスポートしたZIPファイルからデータを復元します。")
         
-        import_file = st.file_uploader(
-            "データパッケージファイル (ZIP)", 
-            type="zip",
-            help="以前エクスポートしたZIPファイルを選択してください"
+        uploaded_file = st.file_uploader(
+            "インポートファイル選択",
+            type=['zip'],
+            help="エクスポートしたZIPファイルを選択してください"
         )
         
-        if import_file and st.button("📥 インポート実行"):
-            with st.spinner("インポート中..."):
-                try:
-                    success, message = import_data_package(import_file)
-                    
-                    if success:
-                        st.success(f"✅ {message}")
-                        st.info("🔄 ページを再読み込みしてデータを確認してください")
-                        logger.info(f"データインポート完了: {message}")
-                    else:
-                        st.error(f"❌ {message}")
+        if uploaded_file is not None:
+            if st.button("📥 データをインポート"):
+                with st.spinner("インポート中..."):
+                    try:
+                        # 一時ファイルに保存
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp_file:
+                            tmp_file.write(uploaded_file.read())
+                            tmp_path = tmp_file.name
                         
-                except Exception as e:
-                    st.error(f"❌ インポートエラー: {e}")
-                    logger.error(f"データインポートエラー: {e}")
+                        success, message = import_data_package(tmp_path)
+                        
+                        if success:
+                            st.success(f"✅ {message}")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {message}")
+                            
+                    except Exception as e:
+                        st.error(f"❌ インポートエラー: {e}")
+    
+    @staticmethod
+    def _render_metrics_export_tab() -> None:
+        """メトリクス出力タブを描画（新規追加）"""
+        if METRICS_EXPORT_AVAILABLE:
+            create_surgery_metrics_export_interface()
+        else:
+            st.error("❌ メトリクス出力機能が利用できません")
+            st.info("📝 reporting/surgery_metrics_exporter.py モジュールを確認してください")
     
     @staticmethod
     def _render_settings_tab() -> None:
         """詳細設定タブを描画"""
         st.subheader("⚙️ 詳細設定")
         
-        # データ削除セクション
-        DataManagementPage._render_data_deletion_section()
+        # 自動バックアップ設定
+        st.write("**🔄 自動バックアップ設定**")
+        
+        auto_backup = st.checkbox(
+            "自動バックアップを有効にする",
+            value=st.session_state.get('auto_backup_enabled', True),
+            help="データ更新時に自動的にバックアップを作成します"
+        )
+        
+        if auto_backup:
+            backup_interval = st.selectbox(
+                "バックアップ間隔",
+                ["毎回", "1日1回", "週1回"],
+                index=0,
+                help="バックアップを作成する頻度を選択してください"
+            )
+            
+            max_backups = st.number_input(
+                "最大保持バックアップ数",
+                min_value=1,
+                max_value=50,
+                value=st.session_state.get('max_backups', 10),
+                help="保持するバックアップファイルの最大数"
+            )
+            
+            # 設定保存
+            if st.button("💾 設定を保存"):
+                st.session_state['auto_backup_enabled'] = auto_backup
+                st.session_state['backup_interval'] = backup_interval
+                st.session_state['max_backups'] = max_backups
+                st.success("✅ 設定を保存しました")
         
         st.markdown("---")
         
-        # システム情報セクション
-        DataManagementPage._render_system_info_section()
-    
-    @staticmethod
-    def _render_data_deletion_section() -> None:
-        """データ削除セクションを描画"""
-        st.subheader("🗑️ データ削除")
+        # データクリア設定
+        st.write("**🗑️ データクリア**")
         
-        st.warning("⚠️ この操作は元に戻せません。全ての保存データとバックアップが削除されます。")
+        st.warning("⚠️ 以下の操作は元に戻せません。十分ご注意ください。")
         
-        # 確認チェックボックス
-        confirm_delete = st.checkbox("削除を確認しました")
+        col1, col2 = st.columns(2)
         
-        if confirm_delete:
+        with col1:
+            if st.button("🗑️ セッションデータをクリア", type="secondary"):
+                if st.checkbox("確認: セッションデータをクリアします", key="clear_session"):
+                    try:
+                        SessionManager.clear_session_data()
+                        st.success("✅ セッションデータをクリアしました")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ クリアエラー: {e}")
+        
+        with col2:
             if st.button("🗑️ 全データを削除", type="secondary"):
-                DataManagementPage._delete_all_data()
-    
-    @staticmethod
-    @safe_file_operation("全データ削除")
-    def _delete_all_data() -> None:
-        """全データを削除"""
-        try:
-            with st.spinner("データ削除中..."):
-                success, result = delete_saved_data()
-                
-                if success:
-                    st.success(f"✅ 削除完了: {', '.join(result)}")
-                    
-                    # セッション状態もクリア
-                    SessionManager.clear_session_data()
-                    
-                    logger.info(f"全データ削除完了: {result}")
-                    st.rerun()
-                else:
-                    st.error(f"❌ 削除失敗: {result}")
-                    
-        except Exception as e:
-            st.error(f"❌ 削除エラー: {e}")
-            logger.error(f"データ削除エラー: {e}")
-    
-    @staticmethod
-    def _render_system_info_section() -> None:
-        """システム情報セクションを描画"""
-        st.subheader("ℹ️ システム情報")
+                if st.checkbox("確認: 全てのデータを削除します", key="delete_all"):
+                    try:
+                        # セッションクリア
+                        SessionManager.clear_session_data()
+                        
+                        # 保存データ削除
+                        delete_saved_data()
+                        
+                        st.success("✅ 全データを削除しました")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ 削除エラー: {e}")
         
-        try:
-            # バージョン情報
-            st.write(f"• Streamlit バージョン: {st.__version__}")
-            st.write(f"• Pandas バージョン: {pd.__version__}")
-            
-            # セッション情報
-            data_info = SessionManager.get_data_info()
-            st.write(f"• セッション状態: {'アクティブ' if data_info['has_data'] else '非アクティブ'}")
-            
-            if data_info['has_data']:
-                st.write(f"• データ列数: {len(data_info['columns'])}")
-                
-            # 診療科数
-            if SessionManager.is_data_loaded():
-                df = SessionManager.get_processed_df()
-                if '実施診療科' in df.columns:
-                    dept_count = len(df['実施診療科'].dropna().unique())
-                    st.write(f"• 診療科数: {dept_count}")
-            
-        except Exception as e:
-            st.error(f"システム情報取得エラー: {e}")
-    
-    @staticmethod
-    def get_data_management_summary() -> Dict[str, Any]:
-        """データ管理サマリー情報を取得"""
-        try:
-            data_info = get_data_info()
-            backup_info = get_backup_info()
-            
-            return {
-                "has_saved_data": bool(data_info),
-                "backup_count": len(backup_info) if backup_info else 0,
-                "session_has_data": SessionManager.is_data_loaded(),
-                "data_source": SessionManager.get_data_source(),
-                "last_saved": data_info.get('last_saved') if data_info else None
+        st.markdown("---")
+        
+        # システム情報
+        st.write("**ℹ️ システム情報**")
+        
+        with st.expander("🔍 システム詳細"):
+            system_info = {
+                "アプリ名": "手術分析ダッシュボード",
+                "バージョン": "2.0",
+                "メトリクス出力": "有効" if METRICS_EXPORT_AVAILABLE else "無効",
+                "セッション状態": "データあり" if SessionManager.is_data_loaded() else "データなし",
+                "現在時刻": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             
-        except Exception as e:
-            logger.error(f"データ管理サマリー取得エラー: {e}")
-            return {"error": str(e)}
+            for key, value in system_info.items():
+                st.write(f"• **{key}**: {value}")
+        
+        # ログ表示
+        with st.expander("📋 ログ表示"):
+            st.info("開発者向け: アプリケーションログをここに表示")
+            st.code("2024-08-05 10:00:00 - INFO - データ管理ページ描画完了")
