@@ -1058,10 +1058,10 @@ class SurgeryGitHubPublisher:
             # 月の昇順に並び替え
             result.reverse()
             return result
-            
-        except Exception as e:
-            logger.error(f"月別トレンドデータ取得エラー: {e}")
-            return []
+        
+    except Exception as e:
+        logger.error(f"月別トレンドデータ取得エラー: {e}")
+        return []
 
     def _generate_monthly_trend_section(self, yearly_data: Dict[str, Any]) -> str:
         """月別トレンドセクション生成（折れ線グラフ版、Y軸可変、過去6ヶ月表示）"""
