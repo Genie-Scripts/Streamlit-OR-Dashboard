@@ -112,14 +112,14 @@ class SurgeryMetricsExporter:
                 "end_date": df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns else analysis_date,
                 "label": "全期間"
             }
-    
+
     def _calculate_overall_metrics(
         self, 
         df: pd.DataFrame, 
         target_dict: Dict[str, float],
         period_info: Dict
     ) -> List[Dict]:
-        """全体メトリクス計算"""
+        """全体メトリクス計算（拡張版）"""
         metrics = []
         
         # 期間内データフィルタリング
@@ -128,67 +128,240 @@ class SurgeryMetricsExporter:
         if period_df.empty:
             return metrics
         
-        # 総手術件数
-        total_count = len(period_df)
+        # === 直近週パフォーマンス ===
+        from datetime import timedelta
+        analysis_date = period_info.get("end_date", datetime.now())
+        week_start = analysis_date - timedelta(days=6)
+        recent_week_df = df[
+            (df['手術実施日_dt'] >= week_start) & 
+            (df['手術実施日_dt'] <= analysis_date)
+        ]
+        
+        # 全身麻酔手術件数（直近週）
+        gas_recent_week = recent_week_df[recent_week_df.get('is_gas_20min', False) == True] if 'is_gas_20min' in recent_week_df.columns else recent_week_df
+        gas_count_week = len(gas_recent_week)
+        
         metrics.append({
             "診療科名": "全体",
-            "メトリクス名": "総手術件数",
-            "値": total_count,
+            "メトリクス名": "全身麻酔手術件数_直近週",
+            "値": gas_count_week,
             "単位": "件",
-            "期間": period_info["label"],
-            "期間タイプ": period_info["type"],
+            "期間": f"{week_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+            "期間タイプ": "直近週",
             "カテゴリ": "全体指標",
             "データ種別": "実績",
             "計算日時": datetime.now().isoformat(),
             "アプリ名": self.app_name
         })
         
-        # 平均手術件数（日別）
-        if '手術実施日_dt' in period_df.columns:
-            daily_counts = period_df.groupby('手術実施日_dt').size()
-            avg_daily = daily_counts.mean()
-            
-            metrics.append({
-                "診療科名": "全体",
-                "メトリクス名": "日平均手術件数",
-                "値": round(avg_daily, 2),
-                "単位": "件/日",
-                "期間": period_info["label"],
-                "期間タイプ": period_info["type"],
-                "カテゴリ": "全体指標",
-                "データ種別": "実績",
-                "計算日時": datetime.now().isoformat(),
-                "アプリ名": self.app_name
-            })
+        # 全手術件数（直近週）
+        metrics.append({
+            "診療科名": "全体",
+            "メトリクス名": "全手術件数_直近週",
+            "値": len(recent_week_df),
+            "単位": "件",
+            "期間": f"{week_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+            "期間タイプ": "直近週",
+            "カテゴリ": "全体指標",
+            "データ種別": "実績",
+            "計算日時": datetime.now().isoformat(),
+            "アプリ名": self.app_name
+        })
         
-        # 目標達成率（全体）
-        if target_dict:
-            total_target = sum(target_dict.values())
-            achievement_rate = (total_count / total_target * 100) if total_target > 0 else 0
-            
-            metrics.append({
-                "診療科名": "全体",
-                "メトリクス名": "目標達成率",
-                "値": round(achievement_rate, 1),
-                "単位": "%",
-                "期間": period_info["label"],
-                "期間タイプ": period_info["type"],
-                "カテゴリ": "目標管理",
-                "データ種別": "実績",
-                "計算日時": datetime.now().isoformat(),
-                "アプリ名": self.app_name
-            })
+        # 平日1日あたり全身麻酔手術件数（直近週）
+        weekday_gas = gas_recent_week[gas_recent_week['手術実施日_dt'].dt.weekday < 5] if not gas_recent_week.empty else pd.DataFrame()
+        num_weekdays = len(pd.bdate_range(start=week_start, end=analysis_date))
+        daily_avg_week = len(weekday_gas) / num_weekdays if num_weekdays > 0 else 0
         
+        metrics.append({
+            "診療科名": "全体",
+            "メトリクス名": "平日1日あたり全身麻酔手術_直近週",
+            "値": round(daily_avg_week, 1),
+            "単位": "件/日",
+            "期間": f"{week_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+            "期間タイプ": "直近週",
+            "カテゴリ": "全体指標",
+            "データ種別": "実績",
+            "計算日時": datetime.now().isoformat(),
+            "アプリ名": self.app_name
+        })
+        
+        # === 直近4週間パフォーマンス ===
+        four_weeks_start = analysis_date - timedelta(days=27)
+        four_weeks_df = df[
+            (df['手術実施日_dt'] >= four_weeks_start) & 
+            (df['手術実施日_dt'] <= analysis_date)
+        ]
+        
+        gas_four_weeks = four_weeks_df[four_weeks_df.get('is_gas_20min', False) == True] if 'is_gas_20min' in four_weeks_df.columns else four_weeks_df
+        
+        # 全身麻酔手術件数（直近4週）
+        metrics.append({
+            "診療科名": "全体",
+            "メトリクス名": "全身麻酔手術件数_直近4週",
+            "値": len(gas_four_weeks),
+            "単位": "件",
+            "期間": f"{four_weeks_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+            "期間タイプ": "直近4週",
+            "カテゴリ": "全体指標",
+            "データ種別": "実績",
+            "計算日時": datetime.now().isoformat(),
+            "アプリ名": self.app_name
+        })
+        
+        # 全手術件数（直近4週）
+        metrics.append({
+            "診療科名": "全体",
+            "メトリクス名": "全手術件数_直近4週",
+            "値": len(four_weeks_df),
+            "単位": "件",
+            "期間": f"{four_weeks_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+            "期間タイプ": "直近4週",
+            "カテゴリ": "全体指標",
+            "データ種別": "実績",
+            "計算日時": datetime.now().isoformat(),
+            "アプリ名": self.app_name
+        })
+        
+        # 平日1日あたり全身麻酔手術件数（直近4週）
+        weekday_gas_4w = gas_four_weeks[gas_four_weeks['手術実施日_dt'].dt.weekday < 5] if not gas_four_weeks.empty else pd.DataFrame()
+        num_weekdays_4w = len(pd.bdate_range(start=four_weeks_start, end=analysis_date))
+        daily_avg_4w = len(weekday_gas_4w) / num_weekdays_4w if num_weekdays_4w > 0 else 0
+        
+        metrics.append({
+            "診療科名": "全体",
+            "メトリクス名": "平日1日あたり全身麻酔手術_直近4週",
+            "値": round(daily_avg_4w, 1),
+            "単位": "件/日",
+            "期間": f"{four_weeks_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+            "期間タイプ": "直近4週",
+            "カテゴリ": "全体指標",
+            "データ種別": "実績",
+            "計算日時": datetime.now().isoformat(),
+            "アプリ名": self.app_name
+        })
+        
+        # === 年度比較 ===
+        current_year = analysis_date.year
+        fiscal_year_start = datetime(current_year, 4, 1) if analysis_date.month >= 4 else datetime(current_year - 1, 4, 1)
+        
+        # 今年度累計
+        current_fiscal_df = df[
+            (df['手術実施日_dt'] >= fiscal_year_start) & 
+            (df['手術実施日_dt'] <= analysis_date)
+        ]
+        gas_current_fiscal = current_fiscal_df[current_fiscal_df.get('is_gas_20min', False) == True] if 'is_gas_20min' in current_fiscal_df.columns else current_fiscal_df
+        
+        metrics.append({
+            "診療科名": "全体",
+            "メトリクス名": "全身麻酔手術件数_今年度累計",
+            "値": len(gas_current_fiscal),
+            "単位": "件",
+            "期間": f"{fiscal_year_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+            "期間タイプ": "年度累計",
+            "カテゴリ": "年度比較",
+            "データ種別": "実績",
+            "計算日時": datetime.now().isoformat(),
+            "アプリ名": self.app_name
+        })
+        
+        # 昨年度同期
+        prev_fiscal_start = datetime(fiscal_year_start.year - 1, 4, 1)
+        prev_fiscal_end = analysis_date.replace(year=analysis_date.year - 1)
+        
+        prev_fiscal_df = df[
+            (df['手術実施日_dt'] >= prev_fiscal_start) & 
+            (df['手術実施日_dt'] <= prev_fiscal_end)
+        ]
+        gas_prev_fiscal = prev_fiscal_df[prev_fiscal_df.get('is_gas_20min', False) == True] if 'is_gas_20min' in prev_fiscal_df.columns else prev_fiscal_df
+        
+        metrics.append({
+            "診療科名": "全体",
+            "メトリクス名": "全身麻酔手術件数_昨年度同期",
+            "値": len(gas_prev_fiscal),
+            "単位": "件",
+            "期間": f"{prev_fiscal_start.strftime('%Y/%m/%d')}~{prev_fiscal_end.strftime('%Y/%m/%d')}",
+            "期間タイプ": "年度比較",
+            "カテゴリ": "年度比較",
+            "データ種別": "実績",
+            "計算日時": datetime.now().isoformat(),
+            "アプリ名": self.app_name
+        })
+        
+        # 前年度同期比
+        growth = len(gas_current_fiscal) - len(gas_prev_fiscal)
+        growth_rate = (growth / len(gas_prev_fiscal) * 100) if len(gas_prev_fiscal) > 0 else 0
+        
+        metrics.append({
+            "診療科名": "全体",
+            "メトリクス名": "前年度同期比_件数",
+            "値": growth,
+            "単位": "件",
+            "期間": analysis_date.strftime('%Y/%m/%d時点'),
+            "期間タイプ": "年度比較",
+            "カテゴリ": "年度比較",
+            "データ種別": "計算値",
+            "計算日時": datetime.now().isoformat(),
+            "アプリ名": self.app_name
+        })
+        
+        metrics.append({
+            "診療科名": "全体",
+            "メトリクス名": "前年度同期比_率",
+            "値": round(growth_rate, 1),
+            "単位": "%",
+            "期間": analysis_date.strftime('%Y/%m/%d時点'),
+            "期間タイプ": "年度比較",
+            "カテゴリ": "年度比較",
+            "データ種別": "計算値",
+            "計算日時": datetime.now().isoformat(),
+            "アプリ名": self.app_name
+        })
+        
+        # === 手術室稼働率 ===
+        # 平日の手術室稼働可能時間（例：8時間 × 手術室数）
+        operating_rooms = 10  # 手術室数（設定可能にする）
+        daily_capacity_hours = 8  # 1日の稼働可能時間
+        
+        weekday_df = four_weeks_df[four_weeks_df['手術実施日_dt'].dt.weekday < 5]
+        
+        if '手術時間_分' in weekday_df.columns:
+            total_surgery_minutes = weekday_df['手術時間_分'].sum()
+        elif '入室時刻' in weekday_df.columns and '退室時刻' in weekday_df.columns:
+            time_df = self._calculate_surgery_duration(weekday_df)
+            total_surgery_minutes = time_df['手術時間_分'].sum() if not time_df.empty else 0
+        else:
+            # デフォルト値として平均60分と仮定
+            total_surgery_minutes = len(weekday_df) * 60
+        
+        total_capacity_minutes = num_weekdays_4w * operating_rooms * daily_capacity_hours * 60
+        utilization_rate = (total_surgery_minutes / total_capacity_minutes * 100) if total_capacity_minutes > 0 else 0
+        
+        metrics.append({
+            "診療科名": "全体",
+            "メトリクス名": "手術室稼働率_直近4週",
+            "値": round(utilization_rate, 1),
+            "単位": "%",
+            "期間": f"{four_weeks_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+            "期間タイプ": "直近4週",
+            "カテゴリ": "稼働率",
+            "データ種別": "計算値",
+            "計算日時": datetime.now().isoformat(),
+            "アプリ名": self.app_name
+        })
         return metrics
-    
+
     def _calculate_department_metrics(
         self,
         df: pd.DataFrame,
         target_dict: Dict[str, float],
         period_info: Dict
     ) -> List[Dict]:
-        """診療科別メトリクス計算"""
+        """診療科別メトリクス計算（修正版）"""
         metrics = []
+        
+        # 分析基準日
+        analysis_date = period_info.get("end_date", datetime.now())
         
         # 期間内データフィルタリング
         period_df = self._filter_by_period(df, period_info)
@@ -196,35 +369,84 @@ class SurgeryMetricsExporter:
         if period_df.empty or '実施診療科' not in period_df.columns:
             return metrics
         
-        # 診療科別集計
-        dept_counts = period_df['実施診療科'].value_counts()
+        # 診療科リスト取得
+        departments = period_df['実施診療科'].unique()
         
-        for dept, count in dept_counts.items():
-            # 手術件数
+        for dept in departments:
+            # --- 修正箇所 ここから ---
+            # 4週平均の計算は、期間で絞り込む前の元の`df`から行う
+            four_weeks_start = analysis_date - timedelta(days=27)
+            
+            # まず診療科で絞り込む
+            dept_df_full = df[df['実施診療科'] == dept]
+            
+            # 次に全身麻酔で絞り込む
+            if 'is_gas_20min' in dept_df_full.columns:
+                gas_dept_df_full = dept_df_full[dept_df_full['is_gas_20min'] == True]
+            else:
+                gas_dept_df_full = dept_df_full
+            
+            # 最後に4週間の期間で絞り込む
+            four_weeks_dept = gas_dept_df_full[
+                (gas_dept_df_full['手術実施日_dt'] >= four_weeks_start) & 
+                (gas_dept_df_full['手術実施日_dt'] <= analysis_date)
+            ]
+            
+            # 4週間の総件数を4で割って週平均を算出
+            total_4weeks = len(four_weeks_dept)
+            avg_4weeks = total_4weeks / 4.0
+            # --- 修正箇所 ここまで ---
+            
             metrics.append({
                 "診療科名": dept,
-                "メトリクス名": "手術件数",
-                "値": count,
+                "メトリクス名": "全身麻酔手術_4週平均",
+                "値": round(avg_4weeks, 1),
+                "単位": "件/週",
+                "期間": f"{four_weeks_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+                "期間タイプ": "4週平均",
+                "カテゴリ": "診療科別実績",
+                "データ種別": "実績",
+                "計算日時": datetime.now().isoformat(),
+                "アプリ名": self.app_name,
+                "補足": f"4週間総数{total_4weeks}件÷4週"
+            })
+            
+            # === 直近週実績など、他の期間に依存する指標は period_df を使用する ===
+            dept_df_period = period_df[period_df['実施診療科'] == dept]
+            if 'is_gas_20min' in dept_df_period.columns:
+                gas_dept_df_period = dept_df_period[dept_df_period['is_gas_20min'] == True]
+            else:
+                gas_dept_df_period = dept_df_period
+    
+            week_start = analysis_date - timedelta(days=6)
+            recent_week_dept = gas_dept_df_period[
+                (gas_dept_df_period['手術実施日_dt'] >= week_start) & 
+                (gas_dept_df_period['手術実施日_dt'] <= analysis_date)
+            ]
+            recent_week_count = len(recent_week_dept)
+            
+            metrics.append({
+                "診療科名": dept,
+                "メトリクス名": "全身麻酔手術_直近週実績",
+                "値": recent_week_count,
                 "単位": "件",
-                "期間": period_info["label"],
-                "期間タイプ": period_info["type"],
+                "期間": f"{week_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+                "期間タイプ": "直近週",
                 "カテゴリ": "診療科別実績",
                 "データ種別": "実績",
                 "計算日時": datetime.now().isoformat(),
                 "アプリ名": self.app_name
             })
             
-            # 目標値と達成率
+            # === 週次目標と達成率 ===
             if target_dict and dept in target_dict:
-                target_value = target_dict[dept]
-                achievement_rate = (count / target_value * 100) if target_value > 0 else 0
+                weekly_target = target_dict[dept]
                 
-                # 目標値
                 metrics.append({
                     "診療科名": dept,
-                    "メトリクス名": "目標件数",
-                    "値": target_value,
-                    "単位": "件",
+                    "メトリクス名": "全身麻酔手術_週次目標",
+                    "値": weekly_target,
+                    "単位": "件/週",
                     "期間": period_info["label"],
                     "期間タイプ": period_info["type"],
                     "カテゴリ": "診療科別目標",
@@ -233,37 +455,38 @@ class SurgeryMetricsExporter:
                     "アプリ名": self.app_name
                 })
                 
-                # 達成率
+                # 達成率（直近週実績 / 週次目標）
+                achievement_rate = (recent_week_count / weekly_target * 100) if weekly_target > 0 else 0
+                
                 metrics.append({
                     "診療科名": dept,
-                    "メトリクス名": "目標達成率",
+                    "メトリクス名": "全身麻酔手術_達成率",
                     "値": round(achievement_rate, 1),
                     "単位": "%",
-                    "期間": period_info["label"],
-                    "期間タイプ": period_info["type"],
+                    "期間": f"{week_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+                    "期間タイプ": "直近週",
                     "カテゴリ": "診療科別目標",
-                    "データ種別": "実績",
+                    "データ種別": "計算値",
                     "計算日時": datetime.now().isoformat(),
                     "アプリ名": self.app_name
                 })
                 
-                # 目標差分
-                diff = count - target_value
-                metrics.append({
-                    "診療科名": dept,
-                    "メトリクス名": "目標差分",
-                    "値": diff,
-                    "単位": "件",
-                    "期間": period_info["label"],
-                    "期間タイプ": period_info["type"],
-                    "カテゴリ": "診療科別目標",
-                    "データ種別": "実績",
-                    "計算日時": datetime.now().isoformat(),
-                    "アプリ名": self.app_name
-                })
+            # === 4週間総数も出力（参考値） ===
+            metrics.append({
+                "診療科名": dept,
+                "メトリクス名": "全身麻酔手術_4週間総数",
+                "値": total_4weeks,
+                "単位": "件",
+                "期間": f"{four_weeks_start.strftime('%Y/%m/%d')}~{analysis_date.strftime('%Y/%m/%d')}",
+                "期間タイプ": "4週間",
+                "カテゴリ": "診療科別実績",
+                "データ種別": "実績",
+                "計算日時": datetime.now().isoformat(),
+                "アプリ名": self.app_name
+            })
         
         return metrics
-    
+
     def _calculate_surgeon_metrics(
         self,
         df: pd.DataFrame,

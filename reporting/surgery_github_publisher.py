@@ -1001,71 +1001,67 @@ class SurgeryGitHubPublisher:
             logger.error(f"詳細分析タブ生成エラー: {e}")
             return '<div id="analysis" class="view-content"><p>詳細分析データの読み込みでエラーが発生しました</p></div>'
 
-
     def _get_monthly_trend_data(self, df: pd.DataFrame, yearly_data: Dict[str, Any]) -> list:
-        """実データに基づく月別トレンドデータ取得（遡って6ヶ月、前年同日比較）"""
+        """実データに基づく月別トレンドデータ取得（月末までデータが揃っている直近12ヶ月分）"""
         try:
             if df.empty:
                 return []
-
-            # 日付列をdatetime型に変換（エラーを無視）
+    
+            # 日付列をdatetime型に変換
+            # ▼▼▼【修正箇所】'pd.to_to_datetime' から 'pd.to_datetime' に修正 ▼▼▼
             df['手術実施日_dt'] = pd.to_datetime(df['手術実施日_dt'], errors='coerce')
             df.dropna(subset=['手術実施日_dt'], inplace=True)
-            
+    
+            # データ内の最新の日付を取得
             analysis_base_date = df['手術実施日_dt'].max()
+    
+            # データが揃っている最後の月（分析基準日の前月）の最終日を計算
+            start_of_current_month = analysis_base_date.replace(day=1)
+            end_of_last_full_month = start_of_current_month - pd.Timedelta(days=1)
             
             result = []
             
-            # 常に遡って6ヶ月分のデータを表示
-            for i in range(6):
-                # 基準となる月を計算 (5ヶ月前から現在月まで)
-                target_month_date = analysis_base_date - pd.DateOffset(months=i)
+            # 直近12ヶ月分のデータを遡って取得
+            for i in range(12):
+                # 基準となる月を計算
+                target_month_date = end_of_last_full_month - pd.DateOffset(months=i)
                 current_year = target_month_date.year
                 current_month = target_month_date.month
-
+    
                 # is_gas_20min列がTrueのデータのみをフィルタリング
                 gas_df = df[df['is_gas_20min'] == True]
-
-                # 今年度データの取得
+    
+                # 今年度データの取得 (該当年・月のデータを全て取得)
                 current_month_df = gas_df[
                     (gas_df['手術実施日_dt'].dt.year == current_year) &
                     (gas_df['手術実施日_dt'].dt.month == current_month)
                 ]
-
-                # 前年度データの取得
+    
+                # 前年度データの取得 (該当年・月のデータを全て取得)
                 last_year_month_df = gas_df[
                     (gas_df['手術実施日_dt'].dt.year == current_year - 1) &
                     (gas_df['手術実施日_dt'].dt.month == current_month)
                 ]
                 
                 month_name = f"{current_year % 100}年{current_month}月"
-                is_partial = (current_year == analysis_base_date.year and current_month == analysis_base_date.month)
-                
                 current_count = len(current_month_df)
                 last_year_count = len(last_year_month_df)
-
-                # 月の途中までのデータについては、前年データも同日までの比較にする
-                if is_partial and analysis_base_date.day < pd.Timestamp(analysis_base_date).days_in_month:
-                    day_of_month = analysis_base_date.day
-                    current_count = len(current_month_df[current_month_df['手術実施日_dt'].dt.day <= day_of_month])
-                    last_year_count = len(last_year_month_df[last_year_month_df['手術実施日_dt'].dt.day <= day_of_month])
-                    month_name += f" ({day_of_month}日時点)"
-
+    
                 result.append({
                     'month': f"{current_year}-{current_month:02d}",
                     'month_name': month_name,
                     'count': int(current_count),
                     'last_year_count': int(last_year_count) if last_year_count > 0 else None,
-                    'is_partial': is_partial
+                    'is_partial': False  # 全て完了した月なので常にFalse
                 })
             
             # 月の昇順に並び替え
             result.reverse()
             return result
-            
-        except Exception as e:
-            logger.error(f"月別トレンドデータ取得エラー: {e}")
-            return []
+        
+    except Exception as e:
+        logger.error(f"月別トレンドデータ取得エラー: {e}")
+        return []
 
     def _generate_monthly_trend_section(self, yearly_data: Dict[str, Any]) -> str:
         """月別トレンドセクション生成（折れ線グラフ版、Y軸可変、過去6ヶ月表示）"""
@@ -1111,7 +1107,7 @@ class SurgeryGitHubPublisher:
 
             html_content = f'''
             <div class="trend-chart">
-                <h3>📈 月別推移（全身麻酔手術件数 - 過去6ヶ月）</h3>
+                <h3>📈 月別推移（全身麻酔手術件数 - 直近12ヶ月）</h3>
                 <div style="position: relative; height: 300px; margin: 20px 0;">
                     <canvas id="monthlyTrendChart"></canvas>
                 </div>
@@ -2790,7 +2786,7 @@ class SurgeryGitHubPublisher:
         except Exception as e:
             logger.error(f"ファイルアップロードエラー: {e}")
             return False, str(e)
-    
+            
     def _ensure_github_pages_workflow(self, skip_ci: bool = False):
         """GitHub Pagesワークフローを確認・作成"""
         workflow_content = """name: Deploy to GitHub Pages
