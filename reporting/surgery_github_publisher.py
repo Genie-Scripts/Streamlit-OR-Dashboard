@@ -1,4 +1,4 @@
-# reporting/surgery_github_publisher.py (病院全体サマリ デザイン統一・レイアウト変更版)
+# reporting/surgery_github_publisher.py (評価ロジック参照先・説明パネル・GA対応修正版)
 
 import pandas as pd
 import logging
@@ -8,6 +8,9 @@ from typing import Dict, Any, Optional, Tuple
 import base64
 import requests
 import json
+import os
+
+from ui.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +24,56 @@ class SurgeryGitHubPublisher:
         self.repo_name = repo_name
         self.branch = branch
         self.base_url = "https://api.github.com"
-        
+
+    # ▼▼▼【修正箇所】google_analytics_id を引数に追加 ▼▼▼
+    def generate_dashboard_html_content(self, df: pd.DataFrame, target_dict: Dict[str, float], 
+                                        period: str, analysis_base_date: pd.Timestamp,
+                                        google_analytics_id: Optional[str] = None) -> Optional[str]:
+        """ダッシュボードのHTMLコンテンツを生成する"""
+        try:
+            logger.info("HTMLコンテンツの生成を開始")
+            self.df = df
+            # ▼▼▼【修正箇所】google_analytics_id を渡す ▼▼▼
+            html_content = self._generate_integrated_html_content(df, target_dict, period, analysis_base_date, google_analytics_id)
+            if html_content:
+                logger.info("HTMLコンテンツの生成が完了")
+            else:
+                logger.warning("HTMLコンテンツの生成に失敗")
+            return html_content
+        except Exception as e:
+            logger.error(f"HTMLコンテンツの生成エラー: {e}", exc_info=True)
+            return None
+
+    def save_html_locally(self, html_content: str, folder: str = "docs") -> Tuple[bool, str]:
+        """HTMLコンテンツをローカルファイルに保存する"""
+        try:
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+                logger.info(f"フォルダを作成しました: {folder}")
+
+            filepath = os.path.join(folder, "index.html")
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(html_content)
+
+            absolute_path = os.path.abspath(filepath)
+            logger.info(f"HTMLをローカルに保存しました: {absolute_path}")
+            return True, f"docs/index.html に保存しました"
+        except Exception as e:
+            logger.error(f"HTMLのローカル保存エラー: {e}", exc_info=True)
+            return False, f"ローカルへの保存に失敗しました: {e}"
+
+    # ▼▼▼【修正箇所】google_analytics_id を引数に追加 ▼▼▼
     def publish_surgery_dashboard(self, df: pd.DataFrame, target_dict: Dict[str, float], 
-                                period: str = "直近12週", 
-                                report_type: str = "integrated_dashboard") -> Tuple[bool, str]:
+                                  analysis_base_date: pd.Timestamp,
+                                  period: str = "直近12週", 
+                                  report_type: str = "integrated_dashboard",
+                                  google_analytics_id: Optional[str] = None) -> Tuple[bool, str]:
         """手術分析ダッシュボードを公開（4タブ統合版）"""
         try:
             logger.info(f"🚀 統合手術分析ダッシュボード公開開始: 4タブ構成")
-            
-            # dfをインスタンス変数として保存
             self.df = df
-            
-            html_content = self._generate_integrated_html_content(df, target_dict, period)
+            # ▼▼▼【修正箇所】google_analytics_id を渡す ▼▼▼
+            html_content = self._generate_integrated_html_content(df, target_dict, period, analysis_base_date, google_analytics_id)
             
             if not html_content:
                 return False, "HTMLコンテンツの生成に失敗しました"
@@ -40,9 +81,8 @@ class SurgeryGitHubPublisher:
             success, message = self._upload_to_github(html_content)
             
             if success:
-                logger.info("✅ 統合手術分析ダッシュボード公開完了")
                 public_url = self.get_public_url()
-                return True, f"統合ダッシュボードの公開が完了しました\n📍 URL: {public_url}\n🏥 病院全体手術サマリ（年度比較付き）\n🏆 ハイスコア TOP3\n📊 診療科別パフォーマンス\n📈 詳細分析"
+                return True, f"統合ダッシュボードの公開が完了しました\n📍 URL: {public_url}"
             else:
                 return False, f"公開に失敗しました: {message}"
                 
@@ -50,16 +90,14 @@ class SurgeryGitHubPublisher:
             logger.error(f"公開エラー: {e}")
             return False, str(e)
     
-    # === ▼▼▼ 新しい関数を追加 ▼▼▼ ===
-    def _get_recent_week_kpi_data(self, df: pd.DataFrame, latest_date: pd.Timestamp) -> Dict[str, Any]:
+    def _get_recent_week_kpi_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> Dict[str, Any]:
         """直近週のKPIデータを計算"""
         try:
             from analysis.weekly import get_analysis_end_date
 
-            analysis_end_date = get_analysis_end_date(latest_date)
+            analysis_end_date = get_analysis_end_date(analysis_base_date)
             if not analysis_end_date: return {}
             
-            # 直近週の期間を定義
             one_week_ago = analysis_end_date - pd.Timedelta(days=6)
             recent_week_df = df[(df['手術実施日_dt'] >= one_week_ago) & (df['手術実施日_dt'] <= analysis_end_date)]
 
@@ -69,12 +107,8 @@ class SurgeryGitHubPublisher:
             gas_df = recent_week_df[recent_week_df['is_gas_20min']]
             gas_weekday_df = gas_df[gas_df['is_weekday']]
             
-            # 週の平日日数を計算
             num_weekdays = len(pd.bdate_range(start=one_week_ago, end=analysis_end_date))
-            if num_weekdays == 0:
-                daily_avg = 0.0
-            else:
-                daily_avg = len(gas_weekday_df) / num_weekdays
+            daily_avg = len(gas_weekday_df) / num_weekdays if num_weekdays > 0 else 0.0
 
             return {
                 "全身麻酔手術件数 (直近週)": len(gas_df),
@@ -85,49 +119,43 @@ class SurgeryGitHubPublisher:
             logger.error(f"直近週KPI取得エラー: {e}")
             return {}
 
+    # ▼▼▼【修正箇所】google_analytics_id を引数に追加 ▼▼▼
     def _generate_integrated_html_content(self, df: pd.DataFrame, target_dict: Dict[str, float], 
-                                        period: str) -> Optional[str]:
+                                          period: str, analysis_base_date: pd.Timestamp,
+                                          google_analytics_id: Optional[str] = None) -> Optional[str]:
         """統合HTMLコンテンツを生成（4タブ構成）"""
         try:
-            # 最新日付取得
-            latest_date = df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns else datetime.now()
-            
-            # 基本データ収集
-            basic_kpi = self._get_basic_kpi_data(df, latest_date)
-            yearly_data = self._get_yearly_comparison_data(df, latest_date)
+            basic_kpi = self._get_basic_kpi_data(df, analysis_base_date)
+            yearly_data = self._get_yearly_comparison_data(df, analysis_base_date)
             high_score_data = self._get_high_score_data(df, target_dict, period)
-            dept_performance = self._get_department_performance_data(df, target_dict, latest_date)
-            recent_week_kpi = self._get_recent_week_kpi_data(df, latest_date) # <<< 直近週データを追加
+            dept_performance = self._get_department_performance_data(df, target_dict, analysis_base_date)
+            recent_week_kpi = self._get_recent_week_kpi_data(df, analysis_base_date)
             
-            # 統合HTML生成
+            # ▼▼▼【修正箇所】google_analytics_id を渡す ▼▼▼
             return self._generate_4tab_dashboard_html(
-                yearly_data=yearly_data,
-                basic_kpi=basic_kpi,
-                high_score_data=high_score_data,
-                dept_performance=dept_performance,
-                period=period,
-                recent_week_kpi=recent_week_kpi # <<< 直近週データを渡す
+                yearly_data=yearly_data, basic_kpi=basic_kpi, high_score_data=high_score_data,
+                dept_performance=dept_performance, period=period, recent_week_kpi=recent_week_kpi,
+                analysis_base_date=analysis_base_date,
+                google_analytics_id=google_analytics_id
             )
-            
         except Exception as e:
             logger.error(f"統合HTMLコンテンツ生成エラー: {e}")
-            # フォールバック: 既存のTOP3のみ表示
-            return self._generate_fallback_html(df, target_dict, period)
+            return self._generate_error_html(str(e))
     
-    def _get_basic_kpi_data(self, df: pd.DataFrame, latest_date: pd.Timestamp) -> Dict[str, Any]:
+    def _get_basic_kpi_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> Dict[str, Any]:
         """基本KPIデータ取得"""
         try:
             from analysis.ranking import get_kpi_summary
-            return get_kpi_summary(df, latest_date)
+            return get_kpi_summary(df, analysis_base_date)
         except Exception as e:
             logger.error(f"基本KPI取得エラー: {e}")
             return {}
     
-    def _get_yearly_comparison_data(self, df: pd.DataFrame, latest_date: pd.Timestamp) -> Dict[str, Any]:
+    def _get_yearly_comparison_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> Dict[str, Any]:
         """年度比較データ取得"""
         try:
             from analysis.ranking import calculate_yearly_surgery_comparison
-            return calculate_yearly_surgery_comparison(df, latest_date)
+            return calculate_yearly_surgery_comparison(df, analysis_base_date)
         except Exception as e:
             logger.error(f"年度比較データ取得エラー: {e}")
             return {}
@@ -135,35 +163,51 @@ class SurgeryGitHubPublisher:
     def _get_high_score_data(self, df: pd.DataFrame, target_dict: Dict[str, float], period: str) -> list:
         """ハイスコアデータ取得"""
         try:
-            from analysis.weekly_surgery_ranking import calculate_weekly_surgery_ranking
-            return calculate_weekly_surgery_ranking(df, target_dict, period)
+            from analysis.surgery_high_score import calculate_surgery_high_scores
+            return calculate_surgery_high_scores(df, target_dict, period)
         except Exception as e:
             logger.error(f"ハイスコアデータ取得エラー: {e}")
             return []
     
     def _get_department_performance_data(self, df: pd.DataFrame, target_dict: Dict[str, float], 
-                                       latest_date: pd.Timestamp) -> pd.DataFrame:
+                                         analysis_base_date: pd.Timestamp) -> pd.DataFrame:
         """診療科別パフォーマンスデータ取得"""
         try:
             from analysis.ranking import get_department_performance_summary
-            return get_department_performance_summary(df, target_dict, latest_date)
+            return get_department_performance_summary(df, target_dict, analysis_base_date)
         except Exception as e:
             logger.error(f"診療科別パフォーマンスデータ取得エラー: {e}")
             return pd.DataFrame()
     
+    # ▼▼▼【修正箇所】google_analytics_id を引数に追加し、HTMLに埋め込む ▼▼▼
     def _generate_4tab_dashboard_html(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any],
                                     high_score_data: list, dept_performance: pd.DataFrame,
-                                    period: str, recent_week_kpi: Dict[str, Any]) -> str: # <<< 引数追加
+                                    period: str, recent_week_kpi: Dict[str, Any],
+                                    analysis_base_date: pd.Timestamp,
+                                    google_analytics_id: Optional[str] = None) -> str:
         """4タブダッシュボードHTML生成"""
         try:
             current_date = datetime.now().strftime('%Y年%m月%d日')
             
+            # Google Analytics トラッキングコードの生成
+            ga_script_html = ""
+            if google_analytics_id:
+                ga_script_html = f"""
+    <script async src="https://www.googletagmanager.com/gtag/js?id={google_analytics_id}"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){{{{dataLayer.push(arguments);}}}}
+      gtag('js', new Date());
+      gtag('config', '{google_analytics_id}');
+    </script>"""
+
             return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🏥 手術分析ダッシュボード</title>
+    {ga_script_html}
     <style>{self._get_integrated_dashboard_css()}</style>
 </head>
 <body>
@@ -172,7 +216,7 @@ class SurgeryGitHubPublisher:
     <div class="container">
         {self._generate_tab_navigation_html()}
         
-        {self._generate_hospital_summary_tab(yearly_data, basic_kpi, recent_week_kpi)}
+        {self._generate_hospital_summary_tab(yearly_data, basic_kpi, recent_week_kpi, analysis_base_date)}
         
         {self._generate_high_score_tab(high_score_data, period)}
         
@@ -191,20 +235,19 @@ class SurgeryGitHubPublisher:
             return self._generate_error_html(str(e))
 
     def _generate_header_html(self) -> str:
-        """ヘッダーHTML生成（情報ボタン付き・正しいスコア配点版）"""
+        """ヘッダーHTML生成（ポータルボタン追加版）"""
         return """
         <div class="header">
+            <a href="../index.html" class="portal-home-button">🏠 ポータルTOPへ</a>
             <h1>🏥 手術分析ダッシュボード</h1>
             <div class="header-subtitle">診療科別パフォーマンス分析システム</div>
             <button class="info-button" onclick="toggleInfoPanel()" title="評価基準・用語説明">
                 ℹ️ 説明
             </button>
         </div>
-        
-        <!-- 情報パネルオーバーレイ -->
+
         <div id="info-overlay" class="info-overlay" onclick="closeInfoPanel()"></div>
         
-        <!-- 情報パネル -->
         <div id="info-panel" class="info-panel">
             <div class="info-panel-header">
                 <h2>📚 評価基準・用語説明</h2>
@@ -243,43 +286,51 @@ class SurgeryGitHubPublisher:
                     <h3>🏆 ハイスコア計算方法（100点満点）</h3>
                     <div class="score-explanation">
                         <p class="score-intro">診療科ランキングの総合スコアは、以下の3つの指標から構成されています：</p>
-                        
                         <div class="score-component">
                             <h4>1. 🎯 全身麻酔手術件数（70点満点）- 最重要指標</h4>
                             <div class="score-detail">
                                 <p>週単位の全身麻酔手術件数（麻酔時間20分以上）を多角的に評価します。</p>
-                                
                                 <div class="score-breakdown">
                                     <h5>配点内訳：</h5>
                                     <ul>
-                                        <li><strong>直近週達成度（30点）</strong>
+                                        <li><strong>直近週達成度（25点）</strong>
                                             <ul>
                                                 <li>CSV目標値に対する達成率で評価</li>
-                                                <li>達成率100%以上：30点</li>
-                                                <li>達成率90-99%：24点</li>
-                                                <li>達成率80-89%：18点</li>
-                                                <li>達成率70-79%：12点</li>
-                                                <li>達成率70%未満：0-6点</li>
+                                                <li>達成率100%以上：25点</li>
+                                                <li>達成率90-99%：20点</li>
+                                                <li>達成率80-89%：15点</li>
+                                                <li>達成率70-79%：10点</li>
+                                                <li>達成率70%未満：0-5点</li>
                                             </ul>
                                         </li>
-                                        <li><strong>改善度（20点）</strong>
+                                        <li><strong>貢献度（20点）</strong>
+                                            <ul>
+                                                <li>病院全体の全身麻酔手術合計件数に占める診療科の割合</li>
+                                                <li>30%以上：20点</li>
+                                                <li>20%～30%未満：15点</li>
+                                                <li>15%～20%未満：10点</li>
+                                                <li>10%～15%未満：5点</li>
+                                                <li>10%未満：0点</li>
+                                            </ul>
+                                        </li>
+                                        <li><strong>改善度（10点）</strong>
                                             <ul>
                                                 <li>評価期間の平均と過去期間の平均を比較</li>
-                                                <li>改善率+20%以上：20点</li>
-                                                <li>改善率+10-19%：15点</li>
-                                                <li>改善率+5-9%：10点</li>
-                                                <li>改善率0-4%：5点</li>
+                                                <li>改善率+20%以上：10点</li>
+                                                <li>改善率+10-19%：8点</li>
+                                                <li>改善率+5-9%：6点</li>
+                                                <li>改善率0-4%：4点</li>
                                                 <li>マイナス成長：0点</li>
                                             </ul>
                                         </li>
-                                        <li><strong>安定性（15点）</strong>
+                                        <li><strong>安定性（10点）</strong>
                                             <ul>
                                                 <li>週次実績の変動係数で評価</li>
-                                                <li>変動係数10%未満：15点（非常に安定）</li>
-                                                <li>変動係数10-20%：12点（安定）</li>
-                                                <li>変動係数20-30%：8点（やや不安定）</li>
-                                                <li>変動係数30-40%：4点（不安定）</li>
-                                                <li>変動係数40%以上：0点（極めて不安定）</li>
+                                                <li>変動係数10%未満：10点</li>
+                                                <li>変動係数10-20%：8点</li>
+                                                <li>変動係数20-30%：6点</li>
+                                                <li>変動係数30-40%：4点</li>
+                                                <li>変動係数40%以上：0点</li>
                                             </ul>
                                         </li>
                                         <li><strong>持続性（5点）</strong>
@@ -294,9 +345,9 @@ class SurgeryGitHubPublisher:
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div class="score-component">
-                            <h4>2. 📊 全手術件数（15点満点）</h4>
+                            <h4>2.  全手術件数（15点満点）</h4>
                             <div class="score-detail">
                                 <p>診療科の全体的な手術活動量を評価します。</p>
                                 
@@ -382,9 +433,66 @@ class SurgeryGitHubPublisher:
                         </div>
                     </div>
                 </div>
-                
-            <!-- 既存の用語説明・計算方法・活用のヒントセクション -->
-            <!-- 省略（変更なし） -->
+
+            <div class="info-section">
+                <h3>📖 用語説明</h3>
+                <dl class="term-list">
+                    <dt>全身麻酔手術</dt>
+                    <dd>麻酔時間が20分以上の手術。病院の手術活動の主要指標として重要視されます。</dd>
+                    
+                    <dt>変動係数（CV）</dt>
+                    <dd>標準偏差を平均値で割った値。データのばらつきの程度を示し、値が小さいほど安定していることを意味します。</dd>
+                    
+                    <dt>週次トレンド</dt>
+                    <dd>週ごとの手術件数の推移を線形回帰で分析した傾向。正の傾きは成長、負の傾きは減少を示します。</dd>
+                    
+                    <dt>達成率</dt>
+                    <dd>実績値を目標値で割った百分率。100%以上が目標達成を意味します。</dd>
+                    
+                    <dt>改善度</dt>
+                    <dd>現在の期間の平均値と過去の期間の平均値を比較した成長率。プラスの値は改善を示します。</dd>
+                </dl>
+            </div>
+            
+            <div class="info-section">
+                <h3>🧮 計算方法</h3>
+                <div class="formula-list">
+                    <div class="formula-item">
+                        <strong>達成率の計算</strong>
+                        <code>達成率 = (実績値 ÷ 目標値) × 100</code>
+                    </div>
+                    
+                    <div class="formula-item">
+                        <strong>改善度の計算</strong>
+                        <code>改善度 = ((現在期間平均 - 過去期間平均) ÷ 過去期間平均) × 100</code>
+                    </div>
+                    
+                    <div class="formula-item">
+                        <strong>変動係数の計算</strong>
+                        <code>変動係数 = (標準偏差 ÷ 平均値) × 100</code>
+                    </div>
+                    
+                    <div class="formula-item">
+                        <strong>手術時間の計算</strong>
+                        <code>手術時間 = 退室時刻 - 入室時刻（深夜跨ぎ対応）</code>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="info-section">
+                <h3>💡 活用のヒント</h3>
+                <ul class="tips-list">
+                    <li><strong>目標設定の重要性：</strong>適切な目標値設定が正確な評価の基礎となります。過去実績と将来計画を考慮して設定しましょう。</li>
+                    
+                    <li><strong>トレンド分析：</strong>単発の数値だけでなく、時系列での推移を見ることで、改善傾向や問題の早期発見が可能です。</li>
+                    
+                    <li><strong>診療科間比較：</strong>他診療科との比較により、自科の相対的な位置づけを把握し、ベストプラクティスを学ぶ機会となります。</li>
+                    
+                    <li><strong>安定性の重視：</strong>高い実績も重要ですが、安定した手術実施は病院運営の観点から極めて重要です。</li>
+                    
+                    <li><strong>定期的な確認：</strong>週次でダッシュボードを確認し、早期の問題発見と対策立案を心がけましょう。</li>
+                </ul>
+            </div>
         </div>
     </div>
     """
@@ -583,19 +691,25 @@ class SurgeryGitHubPublisher:
         </div>
     """
 
-    def _generate_hospital_summary_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any], recent_week_kpi: Dict[str, Any]) -> str: # <<< 引数追加
-        """病院全体手術サマリタブ生成（デザイン統一版）"""
+    def _generate_hospital_summary_tab(self, yearly_data: Dict[str, Any], basic_kpi: Dict[str, Any], 
+                                     recent_week_kpi: Dict[str, Any], analysis_base_date: pd.Timestamp) -> str:
+        """病院全体手術サマリタブ生成（デザイン統一版 + 週別推移チャート追加）"""
         try:
-            # 他のタブとデザインを統一した新しいHTMLを生成
             summary_html = self._generate_unified_hospital_summary_html(yearly_data, basic_kpi, recent_week_kpi)
-            
-            # 月別トレンドチャートはそのまま使用
             monthly_trend_chart = self._generate_monthly_trend_section(yearly_data)
+            
+            if hasattr(self, 'df'):
+                # <<< 修正点: ここで analysis_base_date を使う >>>
+                weekly_trend_data = self._get_weekly_trend_data(self.df, analysis_base_date)
+                weekly_trend_chart = self._generate_weekly_trend_section(weekly_trend_data)
+            else:
+                weekly_trend_chart = self._generate_fallback_weekly_chart()
             
             return f"""
             <div id="surgery-summary" class="view-content active">
                 {summary_html}
                 {monthly_trend_chart}
+                {weekly_trend_chart}
             </div>
             """
             
@@ -887,62 +1001,58 @@ class SurgeryGitHubPublisher:
             logger.error(f"詳細分析タブ生成エラー: {e}")
             return '<div id="analysis" class="view-content"><p>詳細分析データの読み込みでエラーが発生しました</p></div>'
 
-
     def _get_monthly_trend_data(self, df: pd.DataFrame, yearly_data: Dict[str, Any]) -> list:
-        """実データに基づく月別トレンドデータ取得（遡って6ヶ月、前年同日比較）"""
+        """実データに基づく月別トレンドデータ取得（月末までデータが揃っている直近12ヶ月分）"""
         try:
             if df.empty:
                 return []
-
-            # 日付列をdatetime型に変換（エラーを無視）
+    
+            # 日付列をdatetime型に変換
+            # ▼▼▼【修正箇所】'pd.to_to_datetime' から 'pd.to_datetime' に修正 ▼▼▼
             df['手術実施日_dt'] = pd.to_datetime(df['手術実施日_dt'], errors='coerce')
             df.dropna(subset=['手術実施日_dt'], inplace=True)
-            
-            latest_date = df['手術実施日_dt'].max()
+    
+            # データ内の最新の日付を取得
+            analysis_base_date = df['手術実施日_dt'].max()
+    
+            # データが揃っている最後の月（分析基準日の前月）の最終日を計算
+            start_of_current_month = analysis_base_date.replace(day=1)
+            end_of_last_full_month = start_of_current_month - pd.Timedelta(days=1)
             
             result = []
             
-            # 常に遡って6ヶ月分のデータを表示
-            for i in range(6):
-                # 基準となる月を計算 (5ヶ月前から現在月まで)
-                target_month_date = latest_date - pd.DateOffset(months=i)
+            # 直近12ヶ月分のデータを遡って取得
+            for i in range(12):
+                # 基準となる月を計算
+                target_month_date = end_of_last_full_month - pd.DateOffset(months=i)
                 current_year = target_month_date.year
                 current_month = target_month_date.month
-
+    
                 # is_gas_20min列がTrueのデータのみをフィルタリング
                 gas_df = df[df['is_gas_20min'] == True]
-
-                # 今年度データの取得
+    
+                # 今年度データの取得 (該当年・月のデータを全て取得)
                 current_month_df = gas_df[
                     (gas_df['手術実施日_dt'].dt.year == current_year) &
                     (gas_df['手術実施日_dt'].dt.month == current_month)
                 ]
-
-                # 前年度データの取得
+    
+                # 前年度データの取得 (該当年・月のデータを全て取得)
                 last_year_month_df = gas_df[
                     (gas_df['手術実施日_dt'].dt.year == current_year - 1) &
                     (gas_df['手術実施日_dt'].dt.month == current_month)
                 ]
                 
                 month_name = f"{current_year % 100}年{current_month}月"
-                is_partial = (current_year == latest_date.year and current_month == latest_date.month)
-                
                 current_count = len(current_month_df)
                 last_year_count = len(last_year_month_df)
-
-                # 月の途中までのデータについては、前年データも同日までの比較にする
-                if is_partial and latest_date.day < pd.Timestamp(latest_date).days_in_month:
-                    day_of_month = latest_date.day
-                    current_count = len(current_month_df[current_month_df['手術実施日_dt'].dt.day <= day_of_month])
-                    last_year_count = len(last_year_month_df[last_year_month_df['手術実施日_dt'].dt.day <= day_of_month])
-                    month_name += f" ({day_of_month}日時点)"
-
+    
                 result.append({
                     'month': f"{current_year}-{current_month:02d}",
                     'month_name': month_name,
                     'count': int(current_count),
                     'last_year_count': int(last_year_count) if last_year_count > 0 else None,
-                    'is_partial': is_partial
+                    'is_partial': False  # 全て完了した月なので常にFalse
                 })
             
             # 月の昇順に並び替え
@@ -997,7 +1107,7 @@ class SurgeryGitHubPublisher:
 
             html_content = f'''
             <div class="trend-chart">
-                <h3>📈 月別推移（全身麻酔手術件数 - 過去6ヶ月）</h3>
+                <h3>📈 月別推移（全身麻酔手術件数 - 直近12ヶ月）</h3>
                 <div style="position: relative; height: 300px; margin: 20px 0;">
                     <canvas id="monthlyTrendChart"></canvas>
                 </div>
@@ -1170,6 +1280,168 @@ class SurgeryGitHubPublisher:
         except Exception as e:
             logger.error(f"フォールバックチャート生成エラー: {e}")
             return ""
+            
+    def _get_weekly_trend_data(self, df: pd.DataFrame, analysis_base_date: pd.Timestamp) -> list:
+        """週別トレンドデータを取得"""
+        try:
+            from analysis.weekly import get_weekly_trend_data
+            return get_weekly_trend_data(df, analysis_base_date, weeks=8)
+        except Exception as e:
+            logger.error(f"週別トレンドデータ取得エラー: {e}")
+            return []
+    
+    def _generate_weekly_trend_section(self, weekly_data: list) -> str:
+        """週別トレンドセクション生成（折れ線グラフ版、過去8週間表示）"""
+        try:
+            if not weekly_data:
+                return self._generate_fallback_weekly_chart()
+            
+            import json
+            from analysis.weekly import get_weekly_target_value
+            
+            labels = [item['week_name'] for item in weekly_data]
+            values = [int(item['count']) for item in weekly_data]
+            
+            target_value = get_weekly_target_value()  # 95件
+            target_line = [target_value] * len(labels)
+            
+            # Y軸の最大値・最小値をデータに合わせて動的に設定
+            all_plot_values = [v for v in values if v is not None] + [target_value]
+            
+            if not all_plot_values:
+                min_value, max_value = 0, 120
+            else:
+                data_min = min(all_plot_values)
+                data_max = max(all_plot_values)
+                padding = (data_max - data_min) * 0.15 if (data_max - data_min) > 0 else 10
+                min_value = int(max(0, data_min - padding))
+                max_value = int(data_max + padding)
+    
+            html_content = f'''
+            <div class="trend-chart">
+                <h3>📊 週別推移（全身麻酔手術件数 - 過去8週間）</h3>
+                <div style="position: relative; height: 300px; margin: 20px 0;">
+                    <canvas id="weeklyTrendChart"></canvas>
+                </div>
+                <p style="text-align: center; color: #666; font-size: 12px;">
+                    実線：当週実績 | 破線：目標ライン（週{target_value}件）
+                </p>
+            </div>
+            
+            <script>
+            (function() {{
+                function initWeeklyChart() {{
+                    const ctx = document.getElementById('weeklyTrendChart');
+                    if (!ctx) {{
+                        setTimeout(initWeeklyChart, 100);
+                        return;
+                    }}
+                    
+                    const chartData = {{
+                        labels: {json.dumps(labels, ensure_ascii=False)},
+                        datasets: [
+                            {{
+                                label: '当週実績',
+                                data: {json.dumps(values)},
+                                borderColor: 'rgb(34, 197, 94)',
+                                backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                borderWidth: 3,
+                                tension: 0.1,
+                                pointRadius: 5,
+                                pointBackgroundColor: 'rgb(34, 197, 94)',
+                            }},
+                            {{
+                                label: '目標ライン',
+                                data: {json.dumps(target_line)},
+                                borderColor: 'rgb(239, 68, 68)',
+                                borderWidth: 2,
+                                borderDash: [10, 5],
+                                pointRadius: 0,
+                                fill: false
+                            }}
+                        ]
+                    }};
+                    
+                    const chartOptions = {{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {{
+                            legend: {{
+                                display: true,
+                                position: 'top',
+                            }},
+                            tooltip: {{
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {{
+                                    label: function(context) {{
+                                        let label = context.dataset.label || '';
+                                        if (label) {{
+                                            label += ': ';
+                                        }}
+                                        if (context.parsed.y !== null) {{
+                                            label += context.parsed.y + '件';
+                                        }}
+                                        return label;
+                                    }}
+                                }}
+                            }}
+                        }},
+                        scales: {{
+                            y: {{
+                                display: true,
+                                suggestedMin: {min_value},
+                                suggestedMax: {max_value},
+                                grid: {{
+                                    color: 'rgba(0, 0, 0, 0.05)'
+                                }},
+                                ticks: {{
+                                    callback: function(value) {{
+                                        return Math.round(value) + '件';
+                                    }}
+                                }}
+                            }}
+                        }},
+                        interaction: {{
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }}
+                    }};
+                    
+                    new Chart(ctx, {{
+                        type: 'line',
+                        data: chartData,
+                        options: chartOptions
+                    }});
+                }}
+                
+                if (document.readyState === 'loading') {{
+                    document.addEventListener('DOMContentLoaded', initWeeklyChart);
+                }} else {{
+                    setTimeout(initWeeklyChart, 100);
+                }}
+            }})();
+            </script>
+            '''
+            
+            return html_content
+            
+        except Exception as e:
+            logger.error(f"週別トレンドセクション生成エラー: {e}")
+            return self._generate_fallback_weekly_chart()
+    
+    
+    def _generate_fallback_weekly_chart(self) -> str:
+        """フォールバック用の週別チャート表示"""
+        return """
+        <div class="trend-chart">
+            <h3>📊 週別推移（全身麻酔手術件数 - 過去8週間）</h3>
+            <p style="text-align: center; padding: 40px; color: #666;">
+                週別トレンドデータを準備中...
+            </p>
+        </div>
+        """
 
     def _generate_javascript_functions(self) -> str:
         """JavaScript関数生成（情報パネル機能追加版）"""
@@ -1303,7 +1575,35 @@ class SurgeryGitHubPublisher:
                 margin-bottom: 20px;
                 position: relative;
             }
+
+            /* === ポータルへ戻るボタン === */
+            .portal-home-button {
+                position: absolute;
+                top: 20px;
+                left: 20px;
+                background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+                color: white;
+                padding: 10px 20px;
+                border-radius: 25px;
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 14px;
+                transition: var(--transition);
+                border: 2px solid rgba(255, 255, 255, 0.2);
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                box-shadow: var(--shadow-sm);
+                z-index: 10;
+            }
             
+            .portal-home-button:hover {
+                background: linear-gradient(135deg, var(--primary-dark), var(--primary-color));
+                transform: translateY(-2px);
+                box-shadow: var(--shadow-lg);
+                border-color: rgba(255, 255, 255, 0.4);
+            }
+
             .header h1 {
                 font-size: 2.2em;
                 margin: 0 0 10px 0;
@@ -1850,7 +2150,19 @@ class SurgeryGitHubPublisher:
                 }
                 
                 .header {
-                    padding: 20px 16px;
+                    padding: 60px 16px 20px 16px;
+                }
+                
+                .portal-home-button {
+                    top: 15px;
+                    left: 15px;
+                    padding: 8px 16px;
+                    font-size: 12px;
+                }
+                
+                .info-button {
+                    top: 15px;
+                    right: 15px;
                 }
                 
                 .header h1 {
@@ -1903,8 +2215,19 @@ class SurgeryGitHubPublisher:
                     padding: 20px;
                 }
             }
-            
+
             @media (max-width: 480px) {
+                .header {
+                    padding-top: 70px;
+                }
+                
+                .portal-home-button {
+                    top: 10px;
+                    left: 10px;
+                    padding: 6px 12px;
+                    font-size: 11px;
+                }
+
                 .header h1 {
                     font-size: 1.5em;
                 }
@@ -2427,25 +2750,17 @@ class SurgeryGitHubPublisher:
         # 既存のCSSと情報パネル用CSSを結合して返す
         return base_css + info_panel_css
 
-
-    # === 既存関数（変更なし） ===
-    
     def _upload_to_github(self, html_content: str) -> Tuple[bool, str]:
-        """GitHubにHTMLファイルと設定ファイルをアップロード"""
+        """GitHubにHTMLファイルをアップロード"""
         try:
-            # docs/index.html のみワークフローを起動し、他はスキップする
             self._upload_file('docs/index.html', html_content, skip_ci=False)
-            self._upload_file('index.html', html_content, skip_ci=True)
-            self._upload_file('.nojekyll', '', skip_ci=True)
-            self._ensure_github_pages_workflow(skip_ci=True)
-            
             return True, "手術分析ダッシュボードの公開が完了しました"
         except Exception as e:
             logger.error(f"GitHubアップロードエラー: {e}")
             return False, str(e)
-    
+
     def _upload_file(self, filepath: str, content: str, skip_ci: bool = False) -> Tuple[bool, str]:
-        """単一ファイルをGitHubにアップロード（CIスキップ機能付き）"""
+        """単一ファイルをGitHubにアップロード"""
         try:
             headers = {"Authorization": f"Bearer {self.github_token}", "Accept": "application/vnd.github.v3+json"}
             get_url = f"{self.base_url}/repos/{self.repo_owner}/{self.repo_name}/contents/{filepath}"
@@ -2471,7 +2786,7 @@ class SurgeryGitHubPublisher:
         except Exception as e:
             logger.error(f"ファイルアップロードエラー: {e}")
             return False, str(e)
-    
+            
     def _ensure_github_pages_workflow(self, skip_ci: bool = False):
         """GitHub Pagesワークフローを確認・作成"""
         workflow_content = """name: Deploy to GitHub Pages
@@ -2521,125 +2836,104 @@ jobs:
 def create_surgery_github_publisher_interface():
     """手術分析GitHub公開インターフェース（4タブ手術分析ダッシュボード版）"""
     try:
-        # データ確認
         df = st.session_state.get('processed_df', pd.DataFrame())
         target_dict = st.session_state.get('target_dict', {})
-        
+
         if df.empty or not target_dict:
             st.sidebar.info("📊 データ読み込み後に手術分析ダッシュボード公開が利用可能になります")
             return
-        
+
         st.sidebar.markdown("---")
         st.sidebar.header("🚀 手術分析ダッシュボード公開")
-        
-        # 保存された設定を読み込み
+
         saved_settings = load_github_settings()
-        
-        # GitHub設定
-        st.sidebar.markdown("**🔧 GitHub設定**")
-        
-        github_token = st.sidebar.text_input(
-            "GitHub Token",
-            type="password",
-            help="GitHubのPersonal Access Token (repo権限が必要)",
-            key="surgery_github_token"
-        )
-        
-        repo_owner = st.sidebar.text_input(
-            "リポジトリオーナー",
-            value=saved_settings.get('repo_owner', 'Genie-Scripts'),
-            help="GitHubユーザー名または組織名",
-            key="surgery_repo_owner"
-        )
-        
-        repo_name = st.sidebar.text_input(
-            "リポジトリ名",
-            value=saved_settings.get('repo_name', 'Streamlit-Surgery-Dashboard'),
-            help="公開用リポジトリ名",
-            key="surgery_repo_name"
-        )
-        
-        branch = st.sidebar.selectbox(
-            "ブランチ",
-            ["main", "master", "gh-pages"],
-            index=0,
-            key="surgery_branch"
-        )
-        
-        # 公開設定
-        st.sidebar.markdown("**⚙️ 公開設定**")
-        
-        period = st.sidebar.selectbox(
-            "評価期間",
-            ["直近4週", "直近8週", "直近12週"],
-            index=2,
-            key="surgery_publish_period"
-        )
-        
-        # 接続テスト
-        if st.sidebar.button("🔌 接続テスト", key="test_connection"):
-            if github_token and repo_owner and repo_name:
-                success, message = test_github_connection(github_token, repo_owner, repo_name)
-                if success:
-                    st.sidebar.success(f"✅ {message}")
-                    save_github_settings(repo_owner, repo_name, branch)
-                else:
-                    st.sidebar.error(f"❌ {message}")
-            else:
-                st.sidebar.error("すべての項目を入力してください")
-        
-        # 公開実行
-        st.sidebar.markdown("**📤 手術分析ダッシュボード公開**")
-        st.sidebar.info("🏥 病院全体手術サマリ（年度比較付き）\n🏆 ハイスコア TOP3\n📊 診療科別パフォーマンス\n📈 詳細分析")
-        
-        if st.sidebar.button("🚀 手術分析ダッシュボード公開", type="primary", key="surgery_publish_btn"):
-            if not github_token:
-                st.sidebar.error("GitHub Tokenが必要です")
-            elif not repo_owner or not repo_name:
-                st.sidebar.error("リポジトリ情報を入力してください")
-            else:
-                with st.spinner("手術手術ダッシュボードを公開中..."):
-                    publisher = SurgeryGitHubPublisher(
-                        github_token, repo_owner, repo_name, branch
-                    )
-                    
-                    success, message = publisher.publish_surgery_dashboard(
-                        df, target_dict, period, "integrated_dashboard"
-                    )
-                    
+
+        with st.sidebar.expander("🔧 GitHub設定", expanded=False):
+            github_token = st.text_input("GitHub Token", type="password", help="GitHubのPersonal Access Token (repo権限が必要)", key="surgery_github_token")
+            repo_owner = st.text_input("リポジトリオーナー", value=saved_settings.get('repo_owner', 'Genie-Scripts'), help="GitHubユーザー名または組織名", key="surgery_repo_owner")
+            repo_name = st.text_input("リポジトリ名", value=saved_settings.get('repo_name', 'Streamlit-OR-Dashboard'), help="公開用リポジトリ名", key="surgery_repo_name")
+            branch = st.selectbox("ブランチ", ["main", "master", "gh-pages"], index=0, key="surgery_branch")
+            if st.button("🔌 接続テスト", key="test_connection"):
+                if github_token and repo_owner and repo_name:
+                    success, message = test_github_connection(github_token, repo_owner, repo_name)
                     if success:
-                        st.sidebar.success(f"✅ {message}")
-                        
-                        # 設定を保存
+                        st.success(f"✅ {message}")
                         save_github_settings(repo_owner, repo_name, branch)
                     else:
-                        st.sidebar.error(f"❌ {message}")
+                        st.error(f"❌ {message}")
+                else:
+                    st.warning("すべての項目を入力してください")
+
+        st.sidebar.markdown("**⚙️ 公開設定**")
+        period = st.sidebar.selectbox("評価期間", ["直近4週", "直近8週", "直近12週"], index=2, key="surgery_publish_period")
         
-        # ヘルプ情報
+        # ★★ Google Analytics IDの入力欄を追加 ★★
+        google_analytics_id = st.sidebar.text_input(
+            "Google Analytics ID (任意)",
+            key="surgery_ga_id",
+            help="例: G-K6XTL1DM13"
+        )
+
+        publisher = SurgeryGitHubPublisher(github_token, repo_owner, repo_name, branch)
+
+        def _generate_html():
+            analysis_base_date = SessionManager.get_analysis_base_date()
+            if analysis_base_date is None:
+                analysis_base_date = df['手術実施日_dt'].max() if '手術実施日_dt' in df.columns and not df.empty else datetime.now()
+
+            # ★★ GA_IDを渡す ★★
+            return publisher.generate_dashboard_html_content(df, target_dict, period, analysis_base_date, google_analytics_id)
+
+        st.sidebar.markdown("**📤 公開アクション**")
+
+        if st.sidebar.button("💾 ローカル保存のみ", key="local_save_button"):
+            with st.spinner("HTMLを生成して保存中..."):
+                html_content = _generate_html()
+                if html_content:
+                    save_success, save_message = publisher.save_html_locally(html_content)
+                    if save_success: st.sidebar.success(f"✅ {save_message}")
+                    else: st.sidebar.error(f"❌ {save_message}")
+                else:
+                    st.sidebar.error("❌ HTMLの生成に失敗しました。")
+
+        save_on_publish = st.sidebar.checkbox("公開時にローカルにも保存する", value=True)
+
+        if st.sidebar.button("🚀 GitHubに公開", type="primary", key="publish_button"):
+            if not github_token or not repo_owner or not repo_name:
+                st.sidebar.error("GitHub設定の全項目を入力してください。")
+            else:
+                with st.spinner("ダッシュボードを生成・公開中..."):
+                    html_content = _generate_html()
+                    if not html_content:
+                        st.sidebar.error("❌ HTMLの生成に失敗しました。")
+                    else:
+                        # ★★ GA_IDを渡す ★★
+                        success, message = publisher.publish_surgery_dashboard(df, target_dict, SessionManager.get_analysis_base_date() or datetime.now(), period, google_analytics_id=google_analytics_id)
+
+                        if success:
+                            st.sidebar.success(f"✅ {message}")
+                            save_github_settings(repo_owner, repo_name, branch)
+
+                            if save_on_publish:
+                                save_success, save_message = publisher.save_html_locally(html_content)
+                                if save_success: st.sidebar.info(f"ℹ️ {save_message}")
+                                else: st.sidebar.warning(f"⚠️ ローカル保存に失敗: {save_message}")
+                        else:
+                            st.sidebar.error(f"❌ 公開失敗: {message}")
+
         with st.sidebar.expander("📚 使い方"):
             st.markdown("""
-            **📋 事前準備:**
-            1. GitHubでリポジトリ作成
-            2. Settings > Pages > Source: GitHub Actions
-            3. Personal Access Token作成（repo権限）
-            
-            **🏥 手術分析ダッシュボード:**
-            - 病院全体手術サマリ（年度比較機能付き）
-            - ハイスコア TOP3 診療科ランキング
-            - 診療科別パフォーマンス一覧
-            - 詳細分析・改善提案
-            
-            **📱 公開後:**
-            - 自動的にGitHub Pagesで公開
-            - スマートフォン対応
-            - リアルタイム更新可能
-            - 4つのタブで切り替え表示
-            """)
-    
-    except Exception as e:
-        logger.error(f"手術GitHub公開インターフェースエラー: {e}")
-        st.sidebar.error("GitHub公開機能でエラーが発生しました")
+            **💾 ローカル保存のみ:**
+            生成された `index.html` をこのアプリの `docs` フォルダに保存します。
 
+            **🚀 GitHubに公開:**
+            `index.html` を指定されたGitHubリポジトリにアップロードし、Webページとして公開します。
+            - **「公開時にローカルにも保存する」** にチェックを入れると、公開と同時にローカルにもファイルが保存されます。
+            """)
+
+    except Exception as e:
+        logger.error(f"手術GitHub公開インターフェースエラー: {e}", exc_info=True)
+        st.sidebar.error("GitHub公開機能でエラーが発生しました")
 
 # === 既存関数（変更なし） ===
 
